@@ -190,6 +190,9 @@ optimsolver solve <model.mps> [options]
 | `--solver` | `<name>` | Force a specific numerical engine: `pdlp`, `dual_simplex`, `branch_and_cut`, `qp`. |
 | `--time-limit` | `<seconds>` | Set a maximum solve time budget in seconds (positive floating-point number). |
 | `--output` | `<file>` | Write the reconstructed original-space solution vector and duals to a file. |
+| `--json` | `<file>` | Write a structured JSON record of the solve (status, objective, runtime, solution vector, duals). |
+| `--dump-model` | `<file>` | Write the parsed model intermediate representation (IR) as JSON and exit. |
+| `--threads` | `<n>` | Worker thread count (0 = auto, 1 = serial). |
 | `-h`, `--help` | — | Display help information and usage examples for the solve command. |
 
 ### Command Examples
@@ -202,6 +205,12 @@ optimsolver solve models/large_scale.mps --solver pdlp
 
 # Enforce a 30-second time budget and export the solution
 optimsolver solve models/schedule.mps --time-limit 30.0 --output /tmp/solution.txt
+
+# Export a structured JSON solve record
+optimsolver solve models/transport.mps --json /tmp/solve_record.json
+
+# Dump parsed model IR as JSON for parse verification
+optimsolver solve models/production.mps --dump-model /tmp/model_dump.json
 ```
 
 ---
