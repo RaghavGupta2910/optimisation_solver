@@ -50,6 +50,8 @@ add_library(qp_engine
     src/convexity.cpp
     src/qp_solver.cpp
     src/parallel.cpp
+    src/super_admm_kkt_solver.cpp
+    src/super_admm_solver.cpp
 )
 
 target_include_directories(qp_engine PUBLIC
@@ -118,6 +120,9 @@ if(QP_BUILD_TESTS)
     add_executable(qp_tests tests/test_qp_solver.cpp)
     target_link_libraries(qp_tests PRIVATE qp_engine)
     add_test(NAME qp_tests COMMAND qp_tests)
+    add_executable(test_super_admm tests/test_super_admm.cpp)
+    target_link_libraries(test_super_admm PRIVATE qp_engine)
+    add_test(NAME test_super_admm COMMAND test_super_admm)
 
 endif()
 
