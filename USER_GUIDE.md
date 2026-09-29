@@ -10,6 +10,7 @@ A practical guide for compiling, running, and using `optimisation_solver` on mat
 - **Linear Programming (LP):** Continuous variables, linear constraints, linear objective.
 - **Mixed-Integer Linear Programming (MILP):** Continuous, integer, and binary variables, linear constraints, linear objective.
 - **Convex Quadratic Programming (QP):** Continuous variables, linear constraints, convex quadratic objective terms.
+- **Smooth Nonlinear Programming (NLP):** Continuous smooth nonlinear objectives and constraints supplied as `.nlp` files (see [Smooth nonlinear programming](#smooth-nonlinear-programming)).
 
 The solver ingests standard MPS format files, validates model structure, applies presolve reductions once, routes the reduced problem to an appropriate numerical engine, and restores the solution back to original problem coordinates with full primal and dual validation.
 
@@ -19,7 +20,7 @@ The solver ingests standard MPS format files, validates model structure, applies
 
 ### Prerequisites
 - C++17 compliant compiler (`g++` >= 9.0 or `clang++` >= 10.0)
-- CMake >= 3.16
+- CMake >= 3.20
 - Make or Ninja build tool
 
 ### Installation (Recommended)
@@ -114,7 +115,7 @@ This presents the startup banner, mascot, and main menu:
 
   MAIN MENU
 
-  [1]  Open MPS Model
+  [1]  Open MPS Model or NLP Model
   [2]  Solver Settings
   [3]  Model Information
   [4]  Help
@@ -165,7 +166,7 @@ The interactive session maintains a **Current Model** state across operations:
   - Displays detailed IR statistics: filename, detected problem family (LP, QP, MILP), variable counts broken down into continuous, integer, and binary, constraint count, matrix nonzeros, and objective specifications (sense and quadratic terms).
 - **Solver Settings:**
   - View and change session options:
-    - Change numerical engine: automatic dispatch or manual override (`pdlp`, `dual_simplex`, `branch_and_cut`, `qp`).
+    - Change numerical engine: automatic dispatch (`auto`) or manual override (`pdlp`, `dual_simplex`, `branch_and_cut`, `qp`, `nlp`).
     - Change maximum solve time limit in seconds (or 0 for unlimited).
     - Configure default output file destination.
 - **Help:**
@@ -187,13 +188,15 @@ optimsolver solve <model.mps> [options]
 
 | Option | Argument | Description |
 | :--- | :--- | :--- |
-| `--solver` | `<name>` | Force a specific numerical engine: `pdlp`, `dual_simplex`, `branch_and_cut`, `qp`. |
+| `--solver` | `<name>` | Force a specific numerical engine: `pdlp`, `dual_simplex`, `branch_and_cut`, `qp`, `nlp` (`nlp` applies to `.nlp` models and is selected automatically for them). |
 | `--time-limit` | `<seconds>` | Set a maximum solve time budget in seconds (positive floating-point number). |
 | `--output` | `<file>` | Write the reconstructed original-space solution vector and duals to a file. |
 | `--json` | `<file>` | Write a structured JSON record of the solve (status, objective, runtime, solution vector, duals). |
-| `--dump-model` | `<file>` | Write the parsed model intermediate representation (IR) as JSON and exit. |
-| `--threads` | `<n>` | Worker thread count (0 = auto, 1 = serial). |
+| `--dump-model` | `<file>` | Write the parsed model intermediate representation (IR) as JSON and exit. MPS models only. |
+| `--threads` | `<n>` | Worker thread count (0 = auto, 1 = serial). MPS models only. |
 | `-h`, `--help` | — | Display help information and usage examples for the solve command. |
+
+> **Note:** The on-screen `optimsolver solve --help` currently lists only `--solver`, `--time-limit`, `--output` and `--help`. `--json`, `--dump-model` and `--threads` are nonetheless accepted and behave as described in this table.
 
 ### Command Examples
 ```bash
@@ -222,7 +225,7 @@ The dispatcher selects an appropriate engine based on the original model classif
 1. **PDLP (`pdlp`):**
    - **Algorithm:** First-Order Primal-Dual Hybrid Gradient (PDHG).
    - **Best For:** Large-scale continuous linear programs (LPs).
-   - **Features:** Adaptive step sizes (Malitsky-Pock), normalized duality gap restart checks, and Ruiz diagonal matrix preconditioning.
+   - **Features:** Step sizes chosen by the PDLP adaptive linesearch, normalized duality gap restart checks, and Ruiz diagonal matrix preconditioning.
 2. **Dual Simplex (`dual_simplex`):**
    - **Algorithm:** Tableau-based dual simplex.
    - **Best For:** Small-to-medium continuous linear programs (LPs) requiring basic solutions (vertex points).
@@ -235,6 +238,10 @@ The dispatcher selects an appropriate engine based on the original model classif
    - **Algorithm:** Alternating Direction Method of Multipliers (ADMM).
    - **Best For:** Convex Quadratic Programs (QP) with linear constraints.
    - **Features:** Augmented KKT linear system factorizations and adaptive penalty updates ($\rho$).
+5. **NLP Engine (`nlp`):**
+   - **Algorithm:** Elastic sequential quadratic programming (SQP), reusing the QP engine.
+   - **Best For:** Smooth continuous nonlinear models supplied as `.nlp` files.
+   - **Features:** Expression DAG with reverse-mode automatic differentiation and sparse Jacobians. Success means first-order stationarity, not global optimality (see [Smooth nonlinear programming](#smooth-nonlinear-programming)).
 
 ---
 
@@ -308,34 +315,32 @@ If the file contains sections that cannot be represented in `model::Model`, the 
 
 ## 8. Example MPS File
 
-The following small LP instance (`tests/cli/simple_lp.mps`) minimizes $3 x_1 + 2 x_2$ subject to $x_1 + x_2 \ge 4$, with $x_1 \ge 0, x_2 \ge 0$:
+The following small LP instance (`tests/cli/simple_lp.mps`) minimizes $2 x_1 + 3 x_2$ subject to $x_1 + x_2 \ge 4$, with $0 \le x_1 \le 10$ and $0 \le x_2 \le 10$. `OBJSENSE` is omitted, so the default direction is minimize:
 
 ```text
 NAME          SIMPLE_LP
-OBJSENSE
-  MIN
 ROWS
  N  OBJ
  G  C1
 COLUMNS
-    X1        OBJ                  3.0   C1                   1.0
-    X2        OBJ                  2.0   C1                   1.0
+    X1        OBJ       2.0   C1        1.0
+    X2        OBJ       3.0   C1        1.0
 RHS
-    RHS1      C1                   4.0
+    RHS1      C1        4.0
 BOUNDS
- LO BND       X1                   0.0
- LO BND       X2                   0.0
+ UP BND       X1        10.0
+ UP BND       X2        10.0
 ENDATA
 ```
 
 ### Mathematical Interpretation
 $$\begin{aligned}
-\min \quad & 3 x_1 + 2 x_2 \\
+\min \quad & 2 x_1 + 3 x_2 \\
 \text{s.t.} \quad & x_1 + x_2 \ge 4 \\
-& x_1 \ge 0, \quad x_2 \ge 0
+& 0 \le x_1 \le 10, \quad 0 \le x_2 \le 10
 \end{aligned}$$
 
-Optimal solution: $x_1 = 0, x_2 = 4$, with objective value $f^* = 8$.
+Optimal solution: $x_1 = 4, x_2 = 0$, with objective value $f^* = 8$.
 
 ---
 
@@ -396,11 +401,11 @@ When invoking the CLI with `--output <path>`, original-space solution values are
 # Solution for SIMPLE_LP
 # Status: optimal
 # Objective: 8
-X1 0
-X2 4
+X1 4
+X2 0
 # Dual C1 2
-# Reduced cost X1 1
-# Reduced cost X2 0
+# Reduced cost X1 0
+# Reduced cost X2 1
 ```
 
 - Lines starting with `#` are metadata headers, constraint shadow prices, or reduced costs.
@@ -461,7 +466,7 @@ To run a specific test target:
 
 Use `optimsolver solve model.nlp` (or `solve-nlp model.nlp`) for continuous smooth nonlinear objectives
 and constraints. This accepts a versioned expression-DAG format, separate from
-MPS and the natural-language frontend. `solve-nlp --help` lists the available
+MPS. `solve-nlp --help` lists the available
 budgets and JSON reporting options. Successful termination means **first-order
 stationarity**, with original-unit feasibility and KKT residual checks; it does
 not certify a global optimum, does not imply LICQ, MFCQ or another constraint

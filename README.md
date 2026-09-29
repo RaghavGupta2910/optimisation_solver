@@ -2,11 +2,11 @@
 
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B17)
 [![Build System](https://img.shields.io/badge/CMake-3.20%2B-064F8C.svg)](https://cmake.org/)
-[![CTest](https://img.shields.io/badge/CTest-60%2F60%20Passed-brightgreen.svg)](tests/)
+[![CTest](https://img.shields.io/badge/CTest-64%2F64%20Passed-brightgreen.svg)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Verification](https://img.shields.io/badge/Checker-Independent%20Verified-success.svg)](benchmarks/)
+[![Verification](https://img.shields.io/badge/Independent%20Checker-LP%2FQP%20optimality-success.svg)](benchmarks/)
 
-**An indigenous, modular mathematical optimization solver written in modern C++17 for linear programming (LP), mixed-integer linear programming (MILP), and convex quadratic programming (QP).**
+**An indigenous, modular mathematical optimization solver written in modern C++17 for linear programming (LP), mixed-integer linear programming (MILP), and convex quadratic programming (QP), with an additional engine for smooth nonlinear programs (NLP).**
 
 ---
 
@@ -34,10 +34,10 @@ Mathematical optimization is foundational across refinery operations, supply cha
 
 | Metric | Verified Value | Evidence & Scope |
 | :--- | :---: | :--- |
-| **Automated Test Targets** | **60 / 60** | All CTest targets pass (100% pass rate) with compiler assertions preserved across both Debug and Release builds (`-UNDEBUG`). |
-| **Netlib LP Smoke Suite** | **8 / 8** | All 8 benchmark instances in the Netlib smoke suite are solved and independently verified (`optimal_verified`) by the combined solver portfolio. |
-| **Hand-Crafted Reference Suite** | **11 / 11** | Hand-derived analytical test instances covering LP, QP, degenerate, ranged, and MILP formulations pass dual-reader parse checks and solve verification. |
-| **Parser Cross-Check Coverage** | **67** | Benchmark fixtures evaluated across independent C++ and Python readers during parser verification (65 identical, 2 newly parsed in PR #8, 0 regressions). |
+| **Automated Test Targets** | **64 / 64** | All registered CTest targets pass in a Release build. Test targets compile with `-UNDEBUG`, so `assert()` stays active even in Release. |
+| **Netlib LP Smoke Suite (8 small instances)** | **8 / 8** | Every instance is independently verified optimal (`optimal_verified`) by at least one internal engine: Dual Simplex 6/8 and PDLP 6/8 individually, with 4 instances verified by both. The native HiGHS reference verifies 8/8. |
+| **Hand-Crafted Reference Suite (11 instances)** | **11 / 11 parse agreement** | Both readers agree on all 11. Of the solver runs, 7 are `optimal_verified` (LP and 2 QP), 1 is `feasible` (MILP knapsack; no dual-bound certificate), and 3 are `not_applicable`: an infeasible LP and an unbounded LP, whose claims are not certified, and an MIQP that the solver refuses as unsupported. |
+| **Parser Cross-Check** | **19 / 19** | The C++ reader (`--dump-model`) and an independently written Python reader agree field-by-field on all 19 instances in the committed results (8 Netlib + 11 hand-crafted). |
 
 ---
 
@@ -47,42 +47,67 @@ The repository incorporates a reproducible, process-isolated benchmark harness (
 
 ### Netlib LP Smoke Benchmark
 
-Evaluated on the standard Netlib LP smoke set using a 60.0-second time budget per instance (`benchmarks/results/netlib_smoke.json`):
+This is a **smoke suite of 8 small Netlib LP instances**, not the full Netlib collection, and not a general performance claim. Each solver runs as its own process under `bench_runner` with a **30-second timeout** and **one thread** (`--threads 1`).
 
-| Instance | Dimensions (Rows × Cols) | Dual Simplex (`milp_engine`) | PDLP First-Order (`pdlp_engine`) | HiGHS Reference (`highs-ds`) |
+- **Full per-run records:** [`benchmarks/results/netlib_lp.json`](benchmarks/results/netlib_lp.json)
+- **Flat table:** [`netlib_lp_benchmark.csv`](benchmarks/results/netlib_lp_benchmark.csv)
+- **Readable summary:** [`NETLIB_RESULTS.md`](benchmarks/results/NETLIB_RESULTS.md)
+
+**HiGHS reference methodology.** HiGHS is measured with its **native `highs` executable** (HiGHS 1.15.1), not through Python/SciPy:
+
+- It runs the simplex solver with `parallel=off` and one thread.
+- `bench_runner` launches and measures the `highs` process on its own.
+- The solution file is parsed after the run, outside the measured process.
+- HiGHS is a reference only. Nothing in the solver links to it or includes it.
+
+Cells show the independent checker's verdict and the whole-process wall-clock time.
+
+| Instance | Rows × Cols | Dual Simplex (`dual_simplex`) | PDLP (`pdlp`) | HiGHS native (`highs-ds`) |
 | :--- | :---: | :--- | :--- | :--- |
-| `adlittle` | 56 × 97 | **Optimal Verified** (0.005 s) | *No Point [Tolerance Stall]* (0.008 s) | **Optimal Verified** (0.707 s) |
-| `afiro` | 27 × 32 | **Optimal Verified** (0.002 s) | **Optimal Verified** (0.002 s) | **Optimal Verified** (0.343 s) |
-| `blend` | 74 × 83 | Feasible [Iter Limit] (0.021 s) | **Optimal Verified** (0.014 s) | **Optimal Verified** (0.341 s) |
-| `degen2` | 444 × 534 | **Optimal Verified** (1.053 s) | **Optimal Verified** (0.308 s) | **Optimal Verified** (0.254 s) |
-| `recipe` | 91 × 180 | **Optimal Verified** (0.016 s) | **Optimal Verified** (0.016 s) | **Optimal Verified** (0.295 s) |
-| `sc50a` | 50 × 48 | **Optimal Verified** (0.002 s) | **Optimal Verified** (0.003 s) | **Optimal Verified** (0.237 s) |
-| `sc50b` | 50 × 48 | **Optimal Verified** (0.002 s) | *No Point [Tolerance Stall]* (0.003 s) | **Optimal Verified** (0.234 s) |
-| `share2b` | 96 × 79 | Feasible [Iter Limit] (0.063 s) | **Optimal Verified** (0.094 s) | **Optimal Verified** (0.305 s) |
+| `adlittle` | 56 × 97 | **Optimal verified** (0.010 s) | Feasible; objective matches published value, optimality not proven (0.015 s) | **Optimal verified** (0.019 s) |
+| `afiro` | 27 × 32 | **Optimal verified** (0.003 s) | **Optimal verified** (0.003 s) | **Optimal verified** (0.004 s) |
+| `blend` | 74 × 83 | Feasible; stopped at a limit, objective short of published value (0.016 s) | **Optimal verified** (0.017 s) | **Optimal verified** (0.005 s) |
+| `degen2` | 444 × 534 | **Optimal verified** (1.503 s) | **Optimal verified** (0.496 s) | **Optimal verified** (0.022 s) |
+| `recipe` | 91 × 180 | **Optimal verified** (0.028 s) | **Optimal verified** (0.026 s) | **Optimal verified** (0.005 s) |
+| `sc50a` | 50 × 48 | **Optimal verified** (0.004 s) | **Optimal verified** (0.005 s) | **Optimal verified** (0.004 s) |
+| `sc50b` | 50 × 48 | **Optimal verified** (0.004 s) | Feasible; objective matches published value, optimality not proven (0.005 s) | **Optimal verified** (0.005 s) |
+| `share2b` | 96 × 79 | Feasible; stopped at a limit, objective short of published value (0.106 s) | **Optimal verified** (0.156 s) | **Optimal verified** (0.006 s) |
 
-#### Portfolio Observations
+| Solver | Verified optimal | Feasible point returned | Objective matches published value |
+| :--- | :---: | :---: | :---: |
+| `optimsolver:dual_simplex` | 6 / 8 | 8 / 8 | 6 / 8 |
+| `optimsolver:pdlp` | 6 / 8 | 8 / 8 | 8 / 8 |
+| `highs:highs-ds` (native reference) | 8 / 8 | 8 / 8 | 8 / 8 |
 
-1. **Dual Simplex**: Independently verifies **6 / 8** instances. It quickly and accurately solves degenerate bases (`degen2`) and ill-scaled rows (`adlittle`, `sc50b`), but encounters simplex iteration limits on dense cycling models (`blend`, `share2b`).
-2. **PDLP**: Independently verifies **6 / 8** instances. The first-order PDHG method excels on dense and networked formulations (`blend`, `share2b`), but hits numerical stalls at the tight feasibility boundary on `adlittle` and `sc50b`.
-3. **Complementary Coverage**: The two engines are completely complementary. Where Dual Simplex reaches an iteration limit, PDLP succeeds; where PDLP encounters a tolerance boundary, Dual Simplex succeeds. **The combined solver portfolio independently verifies 8 / 8 (100%) of the Netlib smoke benchmark instances.**
+#### Observations
+
+1. **Dual Simplex** independently verifies **6 / 8** instances. On `blend` and `share2b` it stops with status `limit_reached` and returns no duals. The feasible points it returns there are well short of the published optimum: about 0 vs −30.812 on `blend`, and −374.52 vs −415.73 on `share2b`.
+2. **PDLP** independently verifies **6 / 8** instances. On `adlittle` and `sc50b`, PDLP itself reports `optimal`, and its point is feasible with an objective that agrees with the published value. The independent checker could not close an optimality proof, though. On `adlittle` the returned duals do not satisfy the KKT/gap check within tolerance, and on `sc50b` no duals were returned. Both are therefore recorded as `feasible`, not as verified optimal.
+3. **Together**, the two internal engines independently verify all **8 / 8** instances of this smoke suite. Each engine covers the instances the other did not verify, and 4 instances (`afiro`, `degen2`, `recipe`, `sc50a`) are verified by both. This is the union of separate runs, each with one requested engine; a single `optimsolver solve` call uses one engine.
+4. **HiGHS** verifies 8 / 8 and was faster on average (see below). On the largest instance, `degen2`, it took 0.022 s against 0.496 s for PDLP and 1.503 s for Dual Simplex.
 
 ### QP Verification
 
-The hand-crafted benchmark suite (`benchmarks/instances/known/`) includes convex quadratic minimization (`convex_qp.mps`) and concave quadratic maximization (`max_qp.mps`) formulations. Solved via the ADMM engine (`qp_engine`), both instances receive `optimal_verified` from the independent checker by satisfying stationarity, complementary slackness, and duality gap tolerances against hand-derived KKT conditions (`benchmarks/results/known.json`). These serve as exact analytical fixtures rather than a claim of broad external QP benchmark coverage.
+The hand-crafted benchmark suite (`benchmarks/instances/known/`) includes convex quadratic minimization (`convex_qp.mps`) and concave quadratic maximization (`max_qp.mps`) formulations. Both instances are solved by the ADMM engine (`qp_engine`) and receive `optimal_verified` from the independent checker (`benchmarks/results/known.json`). The checker recomputes stationarity, complementary slackness and the duality gap from the original model and finds all three within tolerance. These are small hand-constructed fixtures with known analytical optima, not a claim of broad external QP benchmark coverage.
 
 ---
 
 ## Measured Performance & Memory
 
-Execution time and peak resident set size (RSS) are measured by the POSIX `bench_runner` harness using monotonic clocks (`CLOCK_MONOTONIC`) and kernel process usage (`wait4(..., ru_maxrss)`):
+Wall time and peak resident set size (RSS) are measured by the POSIX `bench_runner` harness. It uses a monotonic clock (`std::chrono::steady_clock`) and reads kernel process usage from `wait4(..., ru_maxrss)`. The figures below are averaged over the 8 smoke-suite instances in `benchmarks/results/netlib_lp.json` (MB = 10⁶ bytes):
 
-| Configuration | Mean Wall Time | Mean Peak Memory (RSS) | Memory Range |
+| Configuration | Mean Wall Time | Mean Peak RSS | Peak RSS Range |
 | :--- | :---: | :---: | :---: |
-| **`optimsolver:pdlp`** | **0.056 s** | **1.98 MB** | 1.57 MB – 3.72 MB |
-| **`optimsolver:dual_simplex`** | **0.146 s** | **2.83 MB** | 1.67 MB – 9.60 MB |
-| **HiGHS Reference (`highs-ds`)** | **0.340 s** | **71.82 MB** | 68.30 MB – 80.28 MB |
+| `optimsolver:pdlp` | 0.090 s | 2.02 MB | 1.65 MB – 3.65 MB |
+| `optimsolver:dual_simplex` | 0.209 s | 2.84 MB | 1.64 MB – 9.52 MB |
+| HiGHS native reference (`highs-ds`) | 0.009 s | 4.17 MB | 3.78 MB – 5.34 MB |
 
-> *Note on performance data: Measured by the repository's isolated benchmark harness on the current 8-instance Netlib smoke set. These figures are workload-specific and are not a general performance claim. The lower memory footprint reflects a native C++ runtime without external runtime environments.*
+> *How to read this:*
+> - *These figures come from 8 small instances on one machine. They are workload-specific and are not a general performance claim.*
+> - *HiGHS was faster on average. On the smallest instances all three are within a few milliseconds of each other, and process start-up dominates.*
+> - *Mean peak RSS was lower for both internal engines on this suite, but not on every instance: Dual Simplex peaked at 9.52 MB on `degen2` against 5.34 MB for HiGHS.*
+> - *`NETLIB_RESULTS.md` reports the per-solver maximum in MiB (3.5 / 9.1 / 5.1).*
+> - *Earlier revisions of this README compared against HiGHS hosted inside a Python/SciPy process (≈ 72 MB, 0.34 s). Those figures mostly measured the interpreter and are superseded.*
 
 ---
 
@@ -134,7 +159,7 @@ Tolerances are frozen across all benchmark runs to guarantee fair comparisons:
 
 The pipeline enforces an explicit separation between what the solver claims and what the checker proves:
 - **Solver Termination Status:** `optimal`, `infeasible`, `unbounded`, `limit_reached`, `numerical_failure`.
-- **Independent Checker Verdict:** `optimal_verified` (primal feasible and gap closed), `feasible` (primal feasible without dual proof), `infeasible_point` (model violated), `nonfinite` (contains NaN/Inf), `no_point` (timeout or crash), `not_applicable` (infeasibility/unboundedness claims).
+- **Independent Checker Verdict:** `optimal_verified` (primal feasible and gap closed), `feasible` (primal feasible without dual proof), `infeasible_point` (model violated), `nonfinite` (contains NaN/Inf), `no_point` (timeout or crash), `not_applicable` (infeasibility/unboundedness claims, which are not independently certified, and models the solver refuses as unsupported).
 
 ---
 
@@ -172,10 +197,11 @@ Presolve reductions (fixed variable elimination, singleton row removals, bound t
 
 ### Core Solver Engines
 
-1. **PDLP Engine (`pdlp_engine/`):** Implements Primal-Dual Hybrid Gradient (PDHG) with Ruiz diagonal equilibration, adaptive step-size selection, and normalized duality gap restarts.
+1. **PDLP Engine (`pdlp_engine/`):** Implements Primal-Dual Hybrid Gradient (PDHG) with Ruiz diagonal equilibration, the PDLP adaptive linesearch for step sizes, and normalized duality gap restarts.
 2. **Dual Simplex Solver (`milp_engine/`):** Tableau-based simplex algorithm delivering exact basic feasible solutions; serves as the root and node relaxation solver for integer programs.
 3. **Branch-and-Cut Engine (`milp_engine/`):** Tree search with dynamic Gomory fractional cut generation, most-fractional branching, and primal rounding heuristics for Mixed-Integer Linear Programs (MILP).
 4. **Convex QP Engine (`qp_engine/`):** Alternating Direction Method of Multipliers (ADMM) with augmented KKT system factorizations for convex quadratic objectives ($f(x) = \frac{1}{2} x^T P x + q^T x + \text{offset}$).
+5. **Smooth NLP Engine (`nlp_engine/`):** Elastic SQP for `.nlp` models. It reports first-order stationarity, not global optimality, and does not use the affine presolve/postsolve path shown above. See [Smooth nonlinear programming](#smooth-nonlinear-programming).
 
 ---
 
@@ -224,14 +250,17 @@ Arguments:
   <model.mps>             Path to input problem file in MPS format (required)
 
 Options:
-  --solver <name>         Select engine: pdlp, dual_simplex, branch_and_cut, qp
+  --solver <name>         Select engine: pdlp, dual_simplex, branch_and_cut, qp, nlp
+                          (nlp is for .nlp models and is chosen automatically for them)
   --time-limit <seconds>  Maximum solve time budget in seconds
   --output <file>         Write reconstructed solution text to file
   --json <file>           Export structured JSON solve record
-  --dump-model <file>     Dump parsed model as JSON for parse verification
-  --threads <n>           Worker thread count (0 = auto, 1 = serial)
+  --dump-model <file>     Dump parsed model as JSON for parse verification (MPS only)
+  --threads <n>           Worker thread count (0 = auto, 1 = serial; MPS only)
   -h, --help              Show help message
 ```
+
+> The on-screen `optimsolver solve --help` currently lists only `--solver`, `--time-limit`, `--output` and `--help`. `--json`, `--dump-model` and `--threads` are accepted and work as documented above.
 
 #### Example Commands
 
@@ -255,17 +284,32 @@ optimsolver solve benchmarks/instances/known/opt_lp.mps \
 ## Testing & Pipeline Verification
 
 ```bash
-# 1. Run all 60 CTest automated targets
+# 1. Run all 64 CTest automated targets
 ctest --test-dir build --output-on-failure
 
 # 2. Run the independent benchmark pipeline self-test
 python3 benchmarks/test_pipeline.py
+```
 
-# 3. Execute Netlib smoke benchmarks (requires Python 3 + SciPy)
-python3 benchmarks/bench.py benchmarks/instances/netlib/afiro.mps \
-    --solvers dual_simplex,pdlp,highs --timeout 60 \
+### Reproducing the Netlib Smoke Benchmark
+
+Only `benchmarks/instances/netlib/afiro.mps` is committed. The other 7 smoke-suite instances must be downloaded first. The fetch script decodes them into `benchmarks/instances/netlib/mps/`, a git-ignored directory, and records per-file SHA-256 hashes in `benchmarks/instances/netlib/manifest.json`. `bench.py` expects a Release build in `build-release/`.
+
+The HiGHS reference needs the native `highs` executable on `PATH`. If `highs` is absent, `bench.py` falls back to a SciPy adapter and labels the row `highs-scipy`. That row's memory figures are not comparable, because they include the Python interpreter.
+
+```bash
+# Release build used by bench.py
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j
+
+# Download the 8-instance Netlib smoke suite
+python3 benchmarks/fetch_netlib.py --set smoke
+
+# Run all three configurations (writes to /tmp so the committed result is untouched)
+python3 benchmarks/bench.py benchmarks/instances/netlib/mps/*.mps \
+    --solvers dual_simplex,pdlp,highs --timeout 30 --threads 1 \
     --best-known benchmarks/instances/netlib/best_known.json \
-    --out benchmarks/results/netlib_afiro.json
+    --out /tmp/netlib_lp.json
 ```
 
 ---
@@ -276,8 +320,10 @@ In adherence to scientific integrity and open engineering:
 
 - **GPU Acceleration (Roadmap):** GPU/CUDA linear algebra kernels for matrix-vector multiplication in PDLP and ADMM QP are planned architecture enhancements and are not yet active in the current release.
 - **Infeasibility / Unboundedness Certification:** Infeasibility and unboundedness are reported by the solver engines, but independent Farkas ray certificates are not yet certified by the external checker.
-- **MILP Dual Bounding:** Branch-and-cut guarantees integer feasibility and cost evaluation (`feasible`), while complete global dual bound certification is in active development.
-- **PDLP Boundary Tuning:** Numerical convergence at tight relative tolerances ($10^{-8}$) on ill-conditioned bases remains an active area of parameter tuning.
+- **MILP Dual Bounding:** Branch-and-cut solutions are independently checked for primal feasibility and integrality (`feasible`), while complete global dual bound certification is in active development.
+- **PDLP Optimality Certification:** On 2 of the 8 Netlib smoke instances (`adlittle`, `sc50b`), PDLP reports `optimal` and returns a feasible point matching the published objective, but the independent checker cannot close an optimality proof from its duals. Improving PDLP's dual quality remains active tuning work.
+- **Dual Simplex Limits:** On 2 of the 8 Netlib smoke instances (`blend`, `share2b`), Dual Simplex stops at a limit with a feasible but clearly suboptimal point.
+- **Benchmark Scope:** Published LP evidence covers an 8-instance Netlib smoke suite. Broad Netlib, large-scale LP, and external QP corpora (e.g. Maros-Mészáros) are not claimed.
 - **Additional Formats:** Support for LP file formats (`.lp`) alongside existing MPS fixed and free format ingestion.
 
 ---
