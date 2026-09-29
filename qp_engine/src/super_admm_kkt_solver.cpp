@@ -2,91 +2,83 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace qp {
 namespace {
 
-bool luFactor(
-    std::vector<double>& a,
-    int n,
-    std::vector<int>& pivot
-) {
-    pivot.resize(static_cast<std::size_t>(n));
+constexpr double kPivotTolerance = 1e-12;
 
-    double scale = 0.0;
-    for (double value : a) {
-        scale = std::max(scale, std::abs(value));
+/**
+ * Dense LU factorization with partial pivoting.
+ *
+ * The matrix is overwritten by its LU factors.
+ * pivots[k] stores the row selected as the pivot at step k.
+ */
+bool luFactor(
+    std::vector<double>& matrix,
+    int n,
+    std::vector<int>& pivots
+) {
+    if (n == 0) {
+        pivots.clear();
+        return true;
     }
 
-    const double tolerance =
-        1e-14 * std::max(1.0, scale);
+    pivots.resize(static_cast<std::size_t>(n));
 
     for (int k = 0; k < n; ++k) {
         int pivotRow = k;
-        double pivotAbs =
-            std::abs(
-                a[static_cast<std::size_t>(k) *
-                      static_cast<std::size_t>(n) +
-                  static_cast<std::size_t>(k)]
-            );
+        double pivotAbs = std::abs(
+            matrix[static_cast<std::size_t>(k) * n + k]
+        );
 
         for (int i = k + 1; i < n; ++i) {
-            const double candidate =
-                std::abs(
-                    a[static_cast<std::size_t>(i) *
-                          static_cast<std::size_t>(n) +
-                      static_cast<std::size_t>(k)]
-                );
+            const double value = std::abs(
+                matrix[static_cast<std::size_t>(i) * n + k]
+            );
 
-            if (candidate > pivotAbs) {
-                pivotAbs = candidate;
+            if (value > pivotAbs) {
+                pivotAbs = value;
                 pivotRow = i;
             }
         }
 
         if (!std::isfinite(pivotAbs) ||
-            pivotAbs <= tolerance) {
+            pivotAbs <= kPivotTolerance) {
             return false;
         }
 
-        pivot[static_cast<std::size_t>(k)] = pivotRow;
+        pivots[static_cast<std::size_t>(k)] = pivotRow;
 
         if (pivotRow != k) {
             for (int j = 0; j < n; ++j) {
                 std::swap(
-                    a[static_cast<std::size_t>(k) *
-                          static_cast<std::size_t>(n) +
-                      static_cast<std::size_t>(j)],
-                    a[static_cast<std::size_t>(pivotRow) *
-                          static_cast<std::size_t>(n) +
-                      static_cast<std::size_t>(j)]
+                    matrix[static_cast<std::size_t>(k) * n + j],
+                    matrix[static_cast<std::size_t>(pivotRow) * n + j]
                 );
             }
         }
 
-        const double diagonal =
-            a[static_cast<std::size_t>(k) *
-                  static_cast<std::size_t>(n) +
-              static_cast<std::size_t>(k)];
+        const double pivot =
+            matrix[static_cast<std::size_t>(k) * n + k];
 
         for (int i = k + 1; i < n; ++i) {
-            const std::size_t ik =
-                static_cast<std::size_t>(i) *
-                    static_cast<std::size_t>(n) +
-                static_cast<std::size_t>(k);
+            double& multiplier =
+                matrix[static_cast<std::size_t>(i) * n + k];
 
-            a[ik] /= diagonal;
+            multiplier /= pivot;
+
+            if (!std::isfinite(multiplier)) {
+                return false;
+            }
 
             for (int j = k + 1; j < n; ++j) {
-                a[static_cast<std::size_t>(i) *
-                      static_cast<std::size_t>(n) +
-                  static_cast<std::size_t>(j)] -=
-                    a[ik] *
-                    a[static_cast<std::size_t>(k) *
-                          static_cast<std::size_t>(n) +
-                      static_cast<std::size_t>(j)];
+                matrix[static_cast<std::size_t>(i) * n + j] -=
+                    multiplier *
+                    matrix[static_cast<std::size_t>(k) * n + j];
             }
         }
     }
@@ -94,64 +86,65 @@ bool luFactor(
     return true;
 }
 
+/**
+ * Solve LU x = rhs after luFactor().
+ */
 bool luSolve(
     const std::vector<double>& lu,
     int n,
-    const std::vector<int>& pivot,
+    const std::vector<int>& pivots,
     std::vector<double>& rhs
 ) {
-    for (int k = 0; k < n; ++k) {
-        const int p = pivot[static_cast<std::size_t>(k)];
+    if (n == 0) {
+        return true;
+    }
 
-        if (p != k) {
+    if (static_cast<int>(rhs.size()) != n ||
+        static_cast<int>(pivots.size()) != n ||
+        static_cast<int>(lu.size()) != n * n) {
+        return false;
+    }
+
+    // Apply row permutations and solve Ly = Pb.
+    for (int k = 0; k < n; ++k) {
+        const int pivotRow = pivots[static_cast<std::size_t>(k)];
+
+        if (pivotRow != k) {
             std::swap(
                 rhs[static_cast<std::size_t>(k)],
-                rhs[static_cast<std::size_t>(p)]
+                rhs[static_cast<std::size_t>(pivotRow)]
             );
         }
-    }
 
-    for (int i = 0; i < n; ++i) {
-        double sum = rhs[static_cast<std::size_t>(i)];
-
-        for (int j = 0; j < i; ++j) {
-            sum -=
-                lu[static_cast<std::size_t>(i) *
-                       static_cast<std::size_t>(n) +
-                   static_cast<std::size_t>(j)] *
-                rhs[static_cast<std::size_t>(j)];
+        for (int i = k + 1; i < n; ++i) {
+            rhs[static_cast<std::size_t>(i)] -=
+                lu[static_cast<std::size_t>(i) * n + k] *
+                rhs[static_cast<std::size_t>(k)];
         }
-
-        rhs[static_cast<std::size_t>(i)] = sum;
     }
 
+    // Solve Ux = y.
     for (int i = n - 1; i >= 0; --i) {
-        double sum = rhs[static_cast<std::size_t>(i)];
+        double value = rhs[static_cast<std::size_t>(i)];
 
         for (int j = i + 1; j < n; ++j) {
-            sum -=
-                lu[static_cast<std::size_t>(i) *
-                       static_cast<std::size_t>(n) +
-                   static_cast<std::size_t>(j)] *
+            value -=
+                lu[static_cast<std::size_t>(i) * n + j] *
                 rhs[static_cast<std::size_t>(j)];
         }
 
         const double diagonal =
-            lu[static_cast<std::size_t>(i) *
-                   static_cast<std::size_t>(n) +
-               static_cast<std::size_t>(i)];
+            lu[static_cast<std::size_t>(i) * n + i];
 
-        if (diagonal == 0.0 ||
-            !std::isfinite(diagonal)) {
+        if (!std::isfinite(diagonal) ||
+            std::abs(diagonal) <= kPivotTolerance) {
             return false;
         }
 
         rhs[static_cast<std::size_t>(i)] =
-            sum / diagonal;
-    }
+            value / diagonal;
 
-    for (double value : rhs) {
-        if (!std::isfinite(value)) {
+        if (!std::isfinite(rhs[static_cast<std::size_t>(i)])) {
             return false;
         }
     }
@@ -161,13 +154,10 @@ bool luSolve(
 
 }  // namespace
 
-SuperAdmmKktSolver::SuperAdmmKktSolver(
-    const QpModel& model
-)
+SuperAdmmKktSolver::SuperAdmmKktSolver(const QpModel& model)
     : model_(&model),
       n_(model.numVariables()),
       m_(model.numConstraints()) {
-    model.validate();
 }
 
 bool SuperAdmmKktSolver::solve(
@@ -178,15 +168,23 @@ bool SuperAdmmKktSolver::solve(
     std::vector<double>& x,
     std::vector<double>& nu
 ) const {
-    if (model_ == nullptr ||
-        sigma <= 0.0 ||
-        !std::isfinite(sigma)) {
+    if (model_ == nullptr) {
         return false;
     }
 
-    if (static_cast<int>(rho.size()) != m_ ||
-        static_cast<int>(rhsX.size()) != n_ ||
-        static_cast<int>(rhsNu.size()) != m_) {
+    if (!std::isfinite(sigma) || sigma <= 0.0) {
+        return false;
+    }
+
+    if (static_cast<int>(rho.size()) != m_) {
+        return false;
+    }
+
+    if (static_cast<int>(rhsX.size()) != n_) {
+        return false;
+    }
+
+    if (static_cast<int>(rhsNu.size()) != m_) {
         return false;
     }
 
@@ -196,84 +194,142 @@ bool SuperAdmmKktSolver::solve(
         }
     }
 
-    const int N = n_ + m_;
+    for (double value : rhsX) {
+        if (!std::isfinite(value)) {
+            return false;
+        }
+    }
 
-    if (N == 0) {
+    for (double value : rhsNu) {
+        if (!std::isfinite(value)) {
+            return false;
+        }
+    }
+
+    const int dimension = n_ + m_;
+
+    /*
+     * There are no variables and no constraints.
+     *
+     * The KKT system is empty, so there is nothing to solve.
+     */
+    if (dimension == 0) {
         x.clear();
         nu.clear();
         return true;
     }
 
-    std::vector<double> K(
-        static_cast<std::size_t>(N) *
-        static_cast<std::size_t>(N),
+    /*
+     * Dense KKT matrix:
+     *
+     *       [ P + sigma I       A^T       ]
+     * K  =  [                         ]
+     *       [ A                -R^{-1}    ]
+     *
+     * where R = diag(rho).
+     */
+    std::vector<double> kkt(
+        static_cast<std::size_t>(dimension) * dimension,
         0.0
     );
 
-    const auto& pRows = model_->P.csrRowStart();
-    const auto& pCols = model_->P.csrColumnIndex();
-    const auto& pVals = model_->P.csrValues();
+    // ---------------------------------------------------------------------
+    // Top-left block: P + sigma I
+    // ---------------------------------------------------------------------
+    const auto& pRowStart = model_->P.csrRowStart();
+    const auto& pColumnIndex = model_->P.csrColumnIndex();
+    const auto& pValues = model_->P.csrValues();
 
-    // P + sigma I.
-    for (int i = 0; i < n_; ++i) {
-        const Offset begin =
-            pRows[static_cast<std::size_t>(i)];
+    for (int row = 0; row < n_; ++row) {
+        const int begin = pRowStart[static_cast<std::size_t>(row)];
+        const int end = pRowStart[static_cast<std::size_t>(row + 1)];
 
-        const Offset end =
-            pRows[static_cast<std::size_t>(i + 1)];
+        for (int k = begin; k < end; ++k) {
+            const int col =
+                pColumnIndex[static_cast<std::size_t>(k)];
 
-        for (Offset k = begin; k < end; ++k) {
-            const int j =
-                pCols[static_cast<std::size_t>(k)];
-
-            K[static_cast<std::size_t>(i) *
-                  static_cast<std::size_t>(N) +
-              static_cast<std::size_t>(j)] +=
-                pVals[static_cast<std::size_t>(k)];
-        }
-
-        K[static_cast<std::size_t>(i) *
-              static_cast<std::size_t>(N) +
-          static_cast<std::size_t>(i)] += sigma;
-    }
-
-    const auto& aRows = model_->A.csrRowStart();
-    const auto& aCols = model_->A.csrColumnIndex();
-    const auto& aVals = model_->A.csrValues();
-
-    // [ A^T ]
-    // [ A    -R^-1 ]
-    for (int i = 0; i < m_; ++i) {
-        const Offset begin =
-            aRows[static_cast<std::size_t>(i)];
-
-        const Offset end =
-            aRows[static_cast<std::size_t>(i + 1)];
-
-        for (Offset k = begin; k < end; ++k) {
-            const int j =
-                aCols[static_cast<std::size_t>(k)];
+            if (col < 0 || col >= n_) {
+                return false;
+            }
 
             const double value =
-                aVals[static_cast<std::size_t>(k)];
+                pValues[static_cast<std::size_t>(k)];
 
-            K[static_cast<std::size_t>(j) *
-                  static_cast<std::size_t>(N) +
-              static_cast<std::size_t>(n_ + i)] = value;
+            if (!std::isfinite(value)) {
+                return false;
+            }
 
-            K[static_cast<std::size_t>(n_ + i) *
-                  static_cast<std::size_t>(N) +
-              static_cast<std::size_t>(j)] = value;
+            kkt[
+                static_cast<std::size_t>(row) * dimension + col
+            ] += value;
         }
 
-        K[static_cast<std::size_t>(n_ + i) *
-              static_cast<std::size_t>(N) +
-          static_cast<std::size_t>(n_ + i)] =
-            -1.0 / rho[static_cast<std::size_t>(i)];
+        kkt[
+            static_cast<std::size_t>(row) * dimension + row
+        ] += sigma;
     }
 
+    // ---------------------------------------------------------------------
+    // Top-right and bottom-left blocks: A^T and A
+    // ---------------------------------------------------------------------
+    const auto& aRowStart = model_->A.csrRowStart();
+    const auto& aColumnIndex = model_->A.csrColumnIndex();
+    const auto& aValues = model_->A.csrValues();
+
+    for (int row = 0; row < m_; ++row) {
+        const int begin = aRowStart[static_cast<std::size_t>(row)];
+        const int end = aRowStart[static_cast<std::size_t>(row + 1)];
+
+        for (int k = begin; k < end; ++k) {
+            const int col =
+                aColumnIndex[static_cast<std::size_t>(k)];
+
+            if (col < 0 || col >= n_) {
+                return false;
+            }
+
+            const double value =
+                aValues[static_cast<std::size_t>(k)];
+
+            if (!std::isfinite(value)) {
+                return false;
+            }
+
+            // Bottom-left: A.
+            kkt[
+                static_cast<std::size_t>(n_ + row) * dimension + col
+            ] += value;
+
+            // Top-right: A^T.
+            kkt[
+                static_cast<std::size_t>(col) * dimension +
+                (n_ + row)
+            ] += value;
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Bottom-right block: -R^{-1}
+    // ---------------------------------------------------------------------
+    for (int i = 0; i < m_; ++i) {
+        const double inverseRho =
+            1.0 / rho[static_cast<std::size_t>(i)];
+
+        if (!std::isfinite(inverseRho)) {
+            return false;
+        }
+
+        kkt[
+            static_cast<std::size_t>(n_ + i) * dimension +
+            (n_ + i)
+        ] = -inverseRho;
+    }
+
+    // ---------------------------------------------------------------------
+    // Right-hand side.
+    // ---------------------------------------------------------------------
     std::vector<double> rhs(
-        static_cast<std::size_t>(N),
+        static_cast<std::size_t>(dimension),
         0.0
     );
 
@@ -287,27 +343,44 @@ bool SuperAdmmKktSolver::solve(
             rhsNu[static_cast<std::size_t>(i)];
     }
 
-    std::vector<int> pivot;
+    // ---------------------------------------------------------------------
+    // LU factorization.
+    // ---------------------------------------------------------------------
+    std::vector<int> pivots;
 
-    if (!luFactor(K, N, pivot)) {
+    if (!luFactor(kkt, dimension, pivots)) {
         return false;
     }
 
-    if (!luSolve(K, N, pivot, rhs)) {
+    // ---------------------------------------------------------------------
+    // Solve.
+    // ---------------------------------------------------------------------
+    if (!luSolve(kkt, dimension, pivots, rhs)) {
         return false;
     }
 
+    // ---------------------------------------------------------------------
+    // Extract x and nu.
+    // ---------------------------------------------------------------------
     x.resize(static_cast<std::size_t>(n_));
     nu.resize(static_cast<std::size_t>(m_));
 
     for (int i = 0; i < n_; ++i) {
         x[static_cast<std::size_t>(i)] =
             rhs[static_cast<std::size_t>(i)];
+
+        if (!std::isfinite(x[static_cast<std::size_t>(i)])) {
+            return false;
+        }
     }
 
     for (int i = 0; i < m_; ++i) {
         nu[static_cast<std::size_t>(i)] =
             rhs[static_cast<std::size_t>(n_ + i)];
+
+        if (!std::isfinite(nu[static_cast<std::size_t>(i)])) {
+            return false;
+        }
     }
 
     return true;
