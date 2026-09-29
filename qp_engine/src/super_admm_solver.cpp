@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -13,182 +13,213 @@ namespace qp {
 namespace {
 
 /*
- * Validate that P is symmetric positive semidefinite.
+ * Dense PSD validation.
  *
- * SuperADMM is intended for convex QPs. The repository's generic
- * QpModel::validate() checks dimensions and bounds, but does not
- * currently enforce symmetry or positive semidefiniteness of P.
+ * SuperADMM is defined for convex QPs, so P must be
+ * symmetric positive semidefinite.
  *
- * This implementation therefore performs that validation locally.
- *
- * A dense Jacobi eigenvalue computation is used because the current
- * SuperADMM KKT backend is itself a dense reference implementation.
+ * This is deliberately a correctness-first implementation.
+ * The production sparse KKT backend can replace this later.
  */
-bool validatePositiveSemidefiniteP(
-    const QpModel& model,
-    std::string& message
+bool isPositiveSemidefinite(
+    const SparseMatrix& matrix
 ) {
-    const int n = model.numVariables();
+    const int rows = matrix.rows();
+    const int columns = matrix.columns();
+
+    if (rows != columns) {
+        return false;
+    }
+
+    const int n = rows;
 
     if (n == 0) {
         return true;
     }
 
     std::vector<double> dense(
-        static_cast<std::size_t>(n) * n,
+        static_cast<std::size_t>(n) *
+            static_cast<std::size_t>(n),
         0.0
     );
 
-    const auto& rowStart = model.P.csrRowStart();
-    const auto& columnIndex = model.P.csrColumnIndex();
-    const auto& values = model.P.csrValues();
+    const auto& rowStart =
+        matrix.csrRowStart();
 
-    for (int row = 0; row < n; ++row) {
-        const int begin =
-            rowStart[static_cast<std::size_t>(row)];
+    const auto& columnIndex =
+        matrix.csrColumnIndex();
 
-        const int end =
-            rowStart[static_cast<std::size_t>(row + 1)];
+    const auto& values =
+        matrix.csrValues();
 
-        for (int k = begin; k < end; ++k) {
-            const int col =
-                columnIndex[static_cast<std::size_t>(k)];
+    for (int i = 0; i < n; ++i) {
+        const Offset begin =
+            rowStart[
+                static_cast<std::size_t>(i)
+            ];
 
-            if (col < 0 || col >= n) {
-                message =
-                    "SuperADMM quadratic matrix P has an invalid index";
+        const Offset end =
+            rowStart[
+                static_cast<std::size_t>(i + 1)
+            ];
+
+        for (Offset k = begin; k < end; ++k) {
+            const int j =
+                columnIndex[
+                    static_cast<std::size_t>(k)
+                ];
+
+            if (j < 0 || j >= n) {
                 return false;
             }
 
             const double value =
-                values[static_cast<std::size_t>(k)];
+                values[
+                    static_cast<std::size_t>(k)
+                ];
 
             if (!std::isfinite(value)) {
-                message =
-                    "SuperADMM quadratic matrix P contains a non-finite value";
                 return false;
             }
 
             dense[
-                static_cast<std::size_t>(row) * n + col
+                static_cast<std::size_t>(i) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(j)
             ] += value;
         }
     }
 
     /*
-     * Check symmetry.
-     *
-     * The problem is represented using a full symmetric P matrix.
-     * We do not silently symmetrize P because that would change the
-     * optimization problem supplied by the user.
+     * Symmetry check.
      */
-    double scale = 1.0;
+    double matrixScale = 0.0;
 
     for (double value : dense) {
-        scale = std::max(scale, std::abs(value));
+        matrixScale =
+            std::max(
+                matrixScale,
+                std::abs(value)
+            );
     }
 
     const double symmetryTolerance =
-        1e-10 * scale;
+        1e-10 *
+        std::max(1.0, matrixScale);
 
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
-            const double pij =
+            const double a =
                 dense[
-                    static_cast<std::size_t>(i) * n + j
+                    static_cast<std::size_t>(i) *
+                        static_cast<std::size_t>(n) +
+                    static_cast<std::size_t>(j)
                 ];
 
-            const double pji =
+            const double b =
                 dense[
-                    static_cast<std::size_t>(j) * n + i
+                    static_cast<std::size_t>(j) *
+                        static_cast<std::size_t>(n) +
+                    static_cast<std::size_t>(i)
                 ];
 
-            if (std::abs(pij - pji) >
+            if (std::abs(a - b) >
                 symmetryTolerance) {
-
-                message =
-                    "SuperADMM requires a symmetric quadratic matrix P";
-
                 return false;
             }
         }
     }
 
     /*
-     * Jacobi diagonalization for a real symmetric matrix.
+     * Jacobi eigenvalue iteration.
      *
-     * After convergence, the diagonal entries approximate the
-     * eigenvalues of P.
+     * A symmetric matrix is PSD iff all eigenvalues
+     * are non-negative.
      */
+    std::vector<double> a =
+        std::move(dense);
+
     const int maxSweeps =
-        std::max(50, 5 * n * n);
+        std::max(
+            10,
+            5 * n * n
+        );
 
     const double eigenTolerance =
-        1e-10 * scale;
+        1e-10 *
+        std::max(1.0, matrixScale);
 
-    for (int sweep = 0; sweep < maxSweeps; ++sweep) {
-        double maxOffDiagonal = 0.0;
-        int p = -1;
-        int q = -1;
+    for (int sweep = 0;
+         sweep < maxSweeps;
+         ++sweep) {
+
+        double largestOffDiagonal = 0.0;
+        int p = 0;
+        int q = 0;
 
         for (int i = 0; i < n; ++i) {
             for (int j = i + 1; j < n; ++j) {
                 const double value =
                     std::abs(
-                        dense[
-                            static_cast<std::size_t>(i) * n + j
+                        a[
+                            static_cast<std::size_t>(i) *
+                                static_cast<std::size_t>(n) +
+                            static_cast<std::size_t>(j)
                         ]
                     );
 
-                if (value > maxOffDiagonal) {
-                    maxOffDiagonal = value;
+                if (value > largestOffDiagonal) {
+                    largestOffDiagonal = value;
                     p = i;
                     q = j;
                 }
             }
         }
 
-        if (maxOffDiagonal <= eigenTolerance) {
-            break;
-        }
-
-        if (p < 0 || q < 0) {
+        if (largestOffDiagonal <= eigenTolerance) {
             break;
         }
 
         const double app =
-            dense[
-                static_cast<std::size_t>(p) * n + p
+            a[
+                static_cast<std::size_t>(p) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(p)
             ];
 
         const double aqq =
-            dense[
-                static_cast<std::size_t>(q) * n + q
+            a[
+                static_cast<std::size_t>(q) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(q)
             ];
 
         const double apq =
-            dense[
-                static_cast<std::size_t>(p) * n + q
+            a[
+                static_cast<std::size_t>(p) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(q)
             ];
 
-        if (std::abs(apq) <= eigenTolerance) {
+        if (apq == 0.0) {
             continue;
         }
 
-        /*
-         * Stable Jacobi rotation.
-         */
         const double theta =
-            0.5 * std::atan2(
+            0.5 *
+            std::atan2(
                 2.0 * apq,
                 aqq - app
             );
 
-        const double c = std::cos(theta);
-        const double s = std::sin(theta);
+        const double c =
+            std::cos(theta);
+
+        const double s =
+            std::sin(theta);
 
         /*
-         * Rotate rows and columns p and q.
+         * Apply the Jacobi rotation.
          */
         for (int k = 0; k < n; ++k) {
             if (k == p || k == q) {
@@ -196,13 +227,17 @@ bool validatePositiveSemidefiniteP(
             }
 
             const double akp =
-                dense[
-                    static_cast<std::size_t>(k) * n + p
+                a[
+                    static_cast<std::size_t>(k) *
+                        static_cast<std::size_t>(n) +
+                    static_cast<std::size_t>(p)
                 ];
 
             const double akq =
-                dense[
-                    static_cast<std::size_t>(k) * n + q
+                a[
+                    static_cast<std::size_t>(k) *
+                        static_cast<std::size_t>(n) +
+                    static_cast<std::size_t>(q)
                 ];
 
             const double newKp =
@@ -211,20 +246,28 @@ bool validatePositiveSemidefiniteP(
             const double newKq =
                 s * akp + c * akq;
 
-            dense[
-                static_cast<std::size_t>(k) * n + p
+            a[
+                static_cast<std::size_t>(k) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(p)
             ] = newKp;
 
-            dense[
-                static_cast<std::size_t>(p) * n + k
+            a[
+                static_cast<std::size_t>(p) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(k)
             ] = newKp;
 
-            dense[
-                static_cast<std::size_t>(k) * n + q
+            a[
+                static_cast<std::size_t>(k) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(q)
             ] = newKq;
 
-            dense[
-                static_cast<std::size_t>(q) * n + k
+            a[
+                static_cast<std::size_t>(q) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(k)
             ] = newKq;
         }
 
@@ -238,75 +281,51 @@ bool validatePositiveSemidefiniteP(
             2.0 * s * c * apq +
             c * c * aqq;
 
-        dense[
-            static_cast<std::size_t>(p) * n + p
+        a[
+            static_cast<std::size_t>(p) *
+                static_cast<std::size_t>(n) +
+            static_cast<std::size_t>(p)
         ] = newApp;
 
-        dense[
-            static_cast<std::size_t>(q) * n + q
+        a[
+            static_cast<std::size_t>(q) *
+                static_cast<std::size_t>(n) +
+            static_cast<std::size_t>(q)
         ] = newAqq;
 
-        dense[
-            static_cast<std::size_t>(p) * n + q
+        a[
+            static_cast<std::size_t>(p) *
+                static_cast<std::size_t>(n) +
+            static_cast<std::size_t>(q)
         ] = 0.0;
 
-        dense[
-            static_cast<std::size_t>(q) * n + p
+        a[
+            static_cast<std::size_t>(q) *
+                static_cast<std::size_t>(n) +
+            static_cast<std::size_t>(p)
         ] = 0.0;
     }
 
     /*
-     * Check whether the Jacobi iteration converged sufficiently.
-     */
-    double finalOffDiagonal = 0.0;
-
-    for (int i = 0; i < n; ++i) {
-        for (int j = i + 1; j < n; ++j) {
-            finalOffDiagonal =
-                std::max(
-                    finalOffDiagonal,
-                    std::abs(
-                        dense[
-                            static_cast<std::size_t>(i) * n + j
-                        ]
-                    )
-                );
-        }
-    }
-
-    if (finalOffDiagonal >
-        100.0 * eigenTolerance) {
-
-        message =
-            "SuperADMM could not reliably determine whether P is PSD";
-
-        return false;
-    }
-
-    /*
-     * A symmetric matrix is PSD iff every eigenvalue is >= 0.
-     *
-     * A small negative tolerance is allowed for floating-point
-     * roundoff.
+     * Check the diagonalized matrix.
      */
     const double psdTolerance =
-        1e-9 * scale;
+        1e-8 *
+        std::max(1.0, matrixScale);
 
     for (int i = 0; i < n; ++i) {
         const double eigenvalue =
-            dense[
-                static_cast<std::size_t>(i) * n + i
+            a[
+                static_cast<std::size_t>(i) *
+                    static_cast<std::size_t>(n) +
+                static_cast<std::size_t>(i)
             ];
 
         if (!std::isfinite(eigenvalue)) {
-            message =
-                "SuperADMM encountered a non-finite eigenvalue of P";
             return false;
         }
 
         if (eigenvalue < -psdTolerance) {
-            message =
-                "SuperADMM requires P to be positive semidefinite";
             return false;
         }
     }
@@ -332,85 +351,108 @@ SuperAdmmSolver::SuperAdmmSolver(
         );
     }
 
-    if (options_.timeLimitSeconds < 0.0 ||
-        !std::isfinite(options_.timeLimitSeconds)) {
+    if (!std::isfinite(options_.timeLimitSeconds) ||
+        options_.timeLimitSeconds < 0.0) {
         throw std::invalid_argument(
-            "SuperADMM timeLimitSeconds must be non-negative and finite"
+            "SuperADMM timeLimitSeconds must be non-negative"
         );
     }
 
-    if (options_.primalTolerance <= 0.0 ||
-        !std::isfinite(options_.primalTolerance)) {
+    if (!std::isfinite(options_.primalTolerance) ||
+        options_.primalTolerance <= 0.0) {
         throw std::invalid_argument(
             "SuperADMM primalTolerance must be positive"
         );
     }
 
-    if (options_.dualTolerance <= 0.0 ||
-        !std::isfinite(options_.dualTolerance)) {
+    if (!std::isfinite(options_.dualTolerance) ||
+        options_.dualTolerance <= 0.0) {
         throw std::invalid_argument(
             "SuperADMM dualTolerance must be positive"
         );
     }
 
-    if (options_.alpha <= 1.0 ||
-        !std::isfinite(options_.alpha)) {
+    if (!std::isfinite(options_.alpha) ||
+        options_.alpha <= 1.0) {
         throw std::invalid_argument(
             "SuperADMM alpha must be greater than 1"
         );
     }
 
-    if (options_.sigma <= 0.0 ||
-        !std::isfinite(options_.sigma)) {
+    if (!std::isfinite(options_.sigma) ||
+        options_.sigma <= 0.0) {
         throw std::invalid_argument(
             "SuperADMM sigma must be positive"
         );
     }
 
-    if (options_.b0 < 1.0 ||
-        !std::isfinite(options_.b0)) {
+    if (!std::isfinite(options_.b0) ||
+        options_.b0 < 1.0) {
         throw std::invalid_argument(
             "SuperADMM b0 must be at least 1"
         );
     }
 
-    if (options_.tau <= 0.0 ||
-        options_.tau >= 1.0 ||
-        !std::isfinite(options_.tau)) {
+    if (!std::isfinite(options_.tau) ||
+        options_.tau <= 0.0 ||
+        options_.tau >= 1.0) {
         throw std::invalid_argument(
             "SuperADMM tau must be in (0,1)"
         );
     }
 
-    if (options_.rho0 <= 0.0 ||
-        !std::isfinite(options_.rho0)) {
+    if (!std::isfinite(options_.rho0) ||
+        options_.rho0 <= 0.0) {
         throw std::invalid_argument(
             "SuperADMM rho0 must be positive"
         );
     }
 
-    if (options_.infeasibilityCheckInterval <= 0) {
+    /*
+     * The numerical stability condition is
+     *
+     *     1 / b <= rho_i <= b.
+     *
+     * Therefore the initial rho must also satisfy it.
+     */
+    if (options_.rho0 < 1.0 / options_.b0 ||
+        options_.rho0 > options_.b0) {
         throw std::invalid_argument(
-            "SuperADMM infeasibilityCheckInterval must be positive"
+            "SuperADMM rho0 must satisfy "
+            "1/b0 <= rho0 <= b0"
         );
     }
 
-    if (options_.infeasibilityTolerance <= 0.0 ||
-        !std::isfinite(options_.infeasibilityTolerance)) {
+    if (options_.infeasibilityCheckInterval <= 0) {
         throw std::invalid_argument(
-            "SuperADMM infeasibilityTolerance must be positive"
+            "SuperADMM infeasibilityCheckInterval "
+            "must be positive"
+        );
+    }
+
+    if (!std::isfinite(options_.infeasibilityTolerance) ||
+        options_.infeasibilityTolerance <= 0.0) {
+        throw std::invalid_argument(
+            "SuperADMM infeasibilityTolerance "
+            "must be positive"
         );
     }
 
     result_ = AdmmResult{};
-    result_.status = QpStatus::IterationLimit;
+
+    result_.status =
+        QpStatus::IterationLimit;
+
     result_.statusMessage =
         "SuperADMM iteration limit reached";
 }
 
 bool SuperAdmmSolver::initialize() {
-    const int n = model_.numVariables();
-    const int m = model_.numConstraints();
+    const int n =
+        model_.numVariables();
+
+    const int m =
+        model_.numConstraints();
 
     x_.assign(
         static_cast<std::size_t>(n),
@@ -460,9 +502,8 @@ bool SuperAdmmSolver::initialize() {
     );
 
     /*
-     * z^0 = A x^0.
-     *
-     * Since x^0 = 0, this is the zero vector.
+     * Algorithm 1 initializes z^0 = A x^0.
+     * Here x^0 = 0.
      */
     if (m > 0) {
         model_.A.multiply(
@@ -488,7 +529,40 @@ bool SuperAdmmSolver::initialize() {
             ? 0.0
             : rho_.front();
 
-    result_.iterations = 0;
+    return true;
+}
+
+bool SuperAdmmSolver::validateConvexObjective() const {
+    return isPositiveSemidefinite(
+        model_.P
+    );
+}
+
+bool SuperAdmmSolver::validateZeroVariableProblem() const {
+    const int m =
+        model_.numConstraints();
+
+    /*
+     * With no optimization variables, Ax = 0.
+     * Therefore feasibility is exactly
+     *
+     *     l_i <= 0 <= u_i.
+     */
+    for (int i = 0; i < m; ++i) {
+        const std::size_t index =
+            static_cast<std::size_t>(i);
+
+        const double lower =
+            model_.l[index];
+
+        const double upper =
+            model_.u[index];
+
+        if (0.0 < lower ||
+            0.0 > upper) {
+            return false;
+        }
+    }
 
     return true;
 }
@@ -509,27 +583,15 @@ AdmmResult SuperAdmmSolver::solve() {
         return result_;
     }
 
-    /*
-     * SuperADMM is a convex-QP algorithm.
-     *
-     * Reject an asymmetric or indefinite P instead of silently
-     * solving a different problem.
-     */
-    {
-        std::string convexityMessage;
+    if (!validateConvexObjective()) {
+        result_.status =
+            QpStatus::InvalidProblem;
 
-        if (!validatePositiveSemidefiniteP(
-                model_,
-                convexityMessage)) {
+        result_.statusMessage =
+            "SuperADMM requires P to be "
+            "symmetric positive semidefinite";
 
-            result_.status =
-                QpStatus::InvalidProblem;
-
-            result_.statusMessage =
-                convexityMessage;
-
-            return result_;
-        }
+        return result_;
     }
 
     if (!initialize()) {
@@ -549,65 +611,34 @@ AdmmResult SuperAdmmSolver::solve() {
         model_.numConstraints();
 
     /*
-     * ------------------------------------------------------------
-     * Zero-variable QP
-     * ------------------------------------------------------------
-     *
-     * If n = 0, then Ax = 0 for every possible x.
-     *
-     * Therefore the problem is feasible iff
-     *
-     *     l_i <= 0 <= u_i
-     *
-     * for every constraint.
+     * Special case: zero-variable QP.
      */
     if (n == 0) {
-        for (int i = 0; i < m; ++i) {
-            const std::size_t index =
-                static_cast<std::size_t>(i);
+        result_.solveTimeSeconds =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start
+            ).count();
 
-            const double lower =
-                model_.l[index];
+        if (!validateZeroVariableProblem()) {
+            result_.status =
+                QpStatus::Infeasible;
 
-            const double upper =
-                model_.u[index];
+            result_.statusMessage =
+                "Zero-variable problem is infeasible";
 
-            if ((std::isfinite(lower) &&
-                 lower > 0.0) ||
-                (std::isfinite(upper) &&
-                 upper < 0.0)) {
+            result_.primal.clear();
 
-                result_.status =
-                    QpStatus::Infeasible;
+            result_.constraintDual.assign(
+                static_cast<std::size_t>(m),
+                0.0
+            );
 
-                result_.statusMessage =
-                    "SuperADMM zero-variable problem is infeasible";
+            result_.primalObjective = 0.0;
+            result_.bestObjective = 0.0;
+            result_.primalResidual = 0.0;
+            result_.dualResidual = 0.0;
 
-                result_.iterations = 0;
-
-                result_.primal.clear();
-
-                result_.constraintDual.assign(
-                    static_cast<std::size_t>(m),
-                    0.0
-                );
-
-                result_.primalObjective = 0.0;
-                result_.bestObjective = 0.0;
-                result_.primalResidual = 0.0;
-                result_.dualResidual = 0.0;
-
-                result_.dualObjective =
-                    -std::numeric_limits<double>::infinity();
-
-                result_.solveTimeSeconds =
-                    std::chrono::duration<double>(
-                        std::chrono::steady_clock::now() -
-                        start
-                    ).count();
-
-                return result_;
-            }
+            return result_;
         }
 
         result_.status =
@@ -615,8 +646,6 @@ AdmmResult SuperAdmmSolver::solve() {
 
         result_.statusMessage =
             "SuperADMM solved zero-variable problem";
-
-        result_.iterations = 0;
 
         result_.primal.clear();
 
@@ -630,21 +659,9 @@ AdmmResult SuperAdmmSolver::solve() {
         result_.primalResidual = 0.0;
         result_.dualResidual = 0.0;
 
-        result_.dualObjective =
-            -std::numeric_limits<double>::infinity();
-
-        result_.solveTimeSeconds =
-            std::chrono::duration<double>(
-                std::chrono::steady_clock::now() -
-                start
-            ).count();
-
         return result_;
     }
 
-    /*
-     * If no iterations are allowed, return immediately.
-     */
     if (options_.iterationLimit == 0) {
         result_.status =
             QpStatus::IterationLimit;
@@ -654,33 +671,25 @@ AdmmResult SuperAdmmSolver::solve() {
 
         result_.solveTimeSeconds =
             std::chrono::duration<double>(
-                std::chrono::steady_clock::now() -
-                start
+                std::chrono::steady_clock::now() - start
             ).count();
 
         return result_;
     }
 
-    /*
-     * ------------------------------------------------------------
-     * Main SuperADMM loop
-     * ------------------------------------------------------------
-     */
     for (std::int64_t iterationCount = 1;
          iterationCount <= options_.iterationLimit;
          ++iterationCount) {
 
-        /*
-         * Time-limit check before starting the next KKT solve.
-         */
         if (options_.timeLimitSeconds > 0.0) {
             const double elapsed =
                 std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() -
-                    start
+                    std::chrono::steady_clock::now() - start
                 ).count();
 
-            if (elapsed >= options_.timeLimitSeconds) {
+            if (elapsed >=
+                options_.timeLimitSeconds) {
+
                 result_.status =
                     QpStatus::TimeLimit;
 
@@ -691,15 +700,12 @@ AdmmResult SuperAdmmSolver::solve() {
             }
         }
 
-        /*
-         * Perform one complete SuperADMM iteration.
-         */
         if (!iteration()) {
             result_.status =
                 QpStatus::NumericalFailure;
 
             result_.statusMessage =
-                "SuperADMM KKT solve or iteration failed";
+                "SuperADMM KKT solve failed";
 
             break;
         }
@@ -725,15 +731,22 @@ AdmmResult SuperAdmmSolver::solve() {
         result_.bestObjective =
             result_.primalObjective;
 
-        if (!std::isfinite(result_.primalObjective) ||
-            !std::isfinite(result_.primalResidual) ||
-            !std::isfinite(result_.dualResidual)) {
+        if (!std::isfinite(
+                result_.primalObjective
+            ) ||
+            !std::isfinite(
+                result_.primalResidual
+            ) ||
+            !std::isfinite(
+                result_.dualResidual
+            )) {
 
             result_.status =
                 QpStatus::NumericalFailure;
 
             result_.statusMessage =
-                "SuperADMM produced a non-finite iterate";
+                "SuperADMM produced a "
+                "non-finite iterate";
 
             break;
         }
@@ -747,11 +760,10 @@ AdmmResult SuperAdmmSolver::solve() {
                   );
 
         /*
-         * Optimality test.
+         * Standard SuperADMM stopping criterion:
          *
-         * r_prim = ||Ax - z||_inf
-         *
-         * r_dual = ||Px + q + A^T y||_inf
+         *     r_prim <= tolerance
+         *     r_dual <= tolerance
          */
         if (result_.primalResidual <=
                 options_.primalTolerance &&
@@ -768,7 +780,9 @@ AdmmResult SuperAdmmSolver::solve() {
         }
 
         /*
-         * Infeasibility checks.
+         * Infeasibility checks are performed every
+         * 10 iterations by default, as specified in
+         * the paper.
          */
         if (iterationCount %
                 options_.infeasibilityCheckInterval ==
@@ -779,7 +793,8 @@ AdmmResult SuperAdmmSolver::solve() {
                     QpStatus::Infeasible;
 
                 result_.statusMessage =
-                    "SuperADMM primal infeasibility detected";
+                    "SuperADMM primal "
+                    "infeasibility detected";
 
                 break;
             }
@@ -789,18 +804,20 @@ AdmmResult SuperAdmmSolver::solve() {
                     QpStatus::Unbounded;
 
                 result_.statusMessage =
-                    "SuperADMM dual infeasibility detected";
+                    "SuperADMM dual "
+                    "infeasibility detected";
 
                 break;
             }
         }
 
         /*
-         * The numerical-stability requirement is
+         * The paper terminates when b < 1 because the
+         * stability interval
          *
-         *     1 / b <= rho_i <= b.
+         *     1/b <= rho_i <= b
          *
-         * Once b < 1 this condition cannot be satisfied.
+         * can no longer be satisfied.
          */
         if (b_ < 1.0) {
             result_.status =
@@ -813,9 +830,6 @@ AdmmResult SuperAdmmSolver::solve() {
         }
     }
 
-    /*
-     * Store the final state.
-     */
     result_.primal =
         x_;
 
@@ -843,16 +857,15 @@ AdmmResult SuperAdmmSolver::solve() {
               );
 
     /*
-     * This implementation does not construct a separate dual
-     * objective. Do not fabricate one.
+     * This implementation does not calculate a separate
+     * dual objective, so do not fabricate one.
      */
     result_.dualObjective =
         -std::numeric_limits<double>::infinity();
 
     result_.solveTimeSeconds =
         std::chrono::duration<double>(
-            std::chrono::steady_clock::now() -
-            start
+            std::chrono::steady_clock::now() - start
         ).count();
 
     return result_;
@@ -865,9 +878,6 @@ bool SuperAdmmSolver::iteration() {
     const int m =
         model_.numConstraints();
 
-    /*
-     * Save the current k-th iterate.
-     */
     const std::vector<double> oldX =
         x_;
 
@@ -878,29 +888,25 @@ bool SuperAdmmSolver::iteration() {
         y_;
 
     /*
-     * Save the previous iterate for the infeasibility
-     * certificates.
+     * Store x^{k-1}, y^{k-1} before computing the
+     * current iteration. These are required for the
+     * infeasibility certificates.
      */
     if (havePreviousIterate_) {
-        previousX_ =
-            oldX;
-
-        previousY_ =
-            oldY;
+        previousX_ = oldX;
+        previousY_ = oldY;
     }
 
     /*
-     * ------------------------------------------------------------
-     * KKT system
-     * ------------------------------------------------------------
+     * ----------------------------------------------------
+     * Equation (17a)
      *
-     * [ P + sigma I     A^T      ] [x^{k+1} ] =
-     * [ A              -R^{-1}  ] [nu^{k+1}]
+     * [ P + sigma I      A^T ] [x^{k+1} ] =
+     * [ sigma x^k - q       ]
      *
-     * RHS:
-     *
-     * [ sigma x^k - q              ]
-     * [ z^k - R^{-1} y^k          ]
+     * [ A             -R^-1 ] [nu^{k+1}] =
+     * [ z^k - R^-1 y^k     ]
+     * ----------------------------------------------------
      */
     std::vector<double> rhsX(
         static_cast<std::size_t>(n),
@@ -926,17 +932,17 @@ bool SuperAdmmSolver::iteration() {
         const std::size_t index =
             static_cast<std::size_t>(i);
 
-        const double ri =
+        const double rho =
             rho_[index];
 
-        if (!std::isfinite(ri) ||
-            ri <= 0.0) {
+        if (!std::isfinite(rho) ||
+            rho <= 0.0) {
             return false;
         }
 
         rhsNu[index] =
             oldZ[index] -
-            oldY[index] / ri;
+            oldY[index] / rho;
     }
 
     std::vector<double> newX;
@@ -948,7 +954,8 @@ bool SuperAdmmSolver::iteration() {
             rhsX,
             rhsNu,
             newX,
-            newNu)) {
+            newNu
+        )) {
         return false;
     }
 
@@ -964,13 +971,13 @@ bool SuperAdmmSolver::iteration() {
         std::move(newNu);
 
     /*
-     * ------------------------------------------------------------
-     * z-tilde update
-     * ------------------------------------------------------------
+     * ----------------------------------------------------
+     * Equation (17b)
      *
      * ztilde^{k+1}
-     * =
-     * z^k + R^{-1}(nu^{k+1} - y^k)
+     *
+     *     = z^k + R_k^{-1}(nu^{k+1} - y^k)
+     * ----------------------------------------------------
      */
     for (int i = 0; i < m; ++i) {
         const std::size_t index =
@@ -981,19 +988,21 @@ bool SuperAdmmSolver::iteration() {
             (
                 nu_[index] -
                 oldY[index]
-            ) / rho_[index];
+            ) /
+            rho_[index];
     }
 
     /*
-     * ------------------------------------------------------------
-     * Projection
-     * ------------------------------------------------------------
+     * ----------------------------------------------------
+     * Equation (17c)
      *
      * z^{k+1}
-     * =
-     * Pi_[l,u](
-     *     ztilde^{k+1} + R^{-1}y^k
-     * )
+     *
+     *   = Pi_[l,u](
+     *       ztilde^{k+1}
+     *       + R_k^{-1} y^k
+     *     )
+     * ----------------------------------------------------
      */
     project(
         zTilde_,
@@ -1002,15 +1011,15 @@ bool SuperAdmmSolver::iteration() {
     );
 
     /*
-     * ------------------------------------------------------------
-     * Dual update
-     * ------------------------------------------------------------
+     * ----------------------------------------------------
+     * Equation (17d)
      *
      * y^{k+1}
-     * =
-     * y^k + R(
-     *     ztilde^{k+1} - z^{k+1}
-     * )
+     *
+     *   = y^k + R_k(
+     *       ztilde^{k+1} - z^{k+1}
+     *     )
+     * ----------------------------------------------------
      */
     for (int i = 0; i < m; ++i) {
         const std::size_t index =
@@ -1019,10 +1028,10 @@ bool SuperAdmmSolver::iteration() {
         y_[index] =
             oldY[index] +
             rho_[index] *
-                (
-                    zTilde_[index] -
-                    z_[index]
-                );
+            (
+                zTilde_[index] -
+                z_[index]
+            );
     }
 
     if (!finiteVector(x_) ||
@@ -1033,7 +1042,7 @@ bool SuperAdmmSolver::iteration() {
     }
 
     /*
-     * KKT residual epsilon.
+     * Equation (19): numerical KKT error.
      */
     const double epsilon =
         kktResidual(
@@ -1042,62 +1051,25 @@ bool SuperAdmmSolver::iteration() {
             oldY
         );
 
-    if (!std::isfinite(epsilon)) {
-        return false;
-    }
-
     const double rPrim =
         primalResidual();
 
-    if (!std::isfinite(rPrim)) {
+    if (!updateBound(
+            epsilon,
+            rPrim
+        )) {
         return false;
     }
 
     /*
-     * ------------------------------------------------------------
-     * Stability-bound update
-     * ------------------------------------------------------------
-     *
-     * b^{k+1} =
-     *
-     *     tau b^k,   if epsilon >= r_prim
-     *
-     *     b^k,       otherwise.
+     * Algorithm 1 line 12 uses z^k, i.e. oldZ,
+     * to determine which constraints are active.
      */
-    updateBound(
-        epsilon,
-        rPrim
-    );
-
-    /*
-     * IMPORTANT:
-     *
-     * The SuperADMM algorithm updates R using z^k,
-     * i.e. the OLD projected variable.
-     */
-    if (b_ < 1.0) {
-        /*
-         * Do not construct a new R when the stability condition
-         *
-         *     1/b <= R_i <= b
-         *
-         * has become impossible.
-         *
-         * solve() will report NumericalFailure after this
-         * iteration.
-         */
-        havePreviousIterate_ =
-            true;
-
-        return true;
+    if (!updateWeights(oldZ)) {
+        return false;
     }
 
-    updateWeights(
-        oldZ
-    );
-
-    havePreviousIterate_ =
-        true;
+    havePreviousIterate_ = true;
 
     return true;
 }
@@ -1120,7 +1092,8 @@ void SuperAdmmSolver::project(
 
         const double value =
             zTilde[index] +
-            yOld[index] / rho_[index];
+            yOld[index] /
+                rho_[index];
 
         const double lower =
             model_.l[index];
@@ -1133,14 +1106,12 @@ void SuperAdmmSolver::project(
 
         if (std::isfinite(lower) &&
             projected < lower) {
-            projected =
-                lower;
+            projected = lower;
         }
 
         if (std::isfinite(upper) &&
             projected > upper) {
-            projected =
-                upper;
+            projected = upper;
         }
 
         zNew[index] =
@@ -1148,25 +1119,54 @@ void SuperAdmmSolver::project(
     }
 }
 
-void SuperAdmmSolver::updateBound(
+bool SuperAdmmSolver::updateBound(
     double epsilon,
     double primalResidualValue
 ) {
     if (!std::isfinite(epsilon) ||
         !std::isfinite(primalResidualValue)) {
-        return;
+        return false;
     }
 
+    /*
+     * Equation (18):
+     *
+     * b^{k+1} =
+     *
+     *     tau b^k,  if epsilon >= r_prim
+     *
+     *     b^k,      otherwise.
+     */
     if (epsilon >= primalResidualValue) {
         b_ *= options_.tau;
     }
+
+    if (!std::isfinite(b_)) {
+        return false;
+    }
+
+    return true;
 }
 
-void SuperAdmmSolver::updateWeights(
+bool SuperAdmmSolver::updateWeights(
     const std::vector<double>& oldZ
 ) {
     const int m =
         model_.numConstraints();
+
+    /*
+     * Once b < 1, the stability interval is empty.
+     * Do not generate an invalid R.
+     */
+    if (b_ < 1.0) {
+        return true;
+    }
+
+    const double lowerRho =
+        1.0 / b_;
+
+    const double upperRho =
+        b_;
 
     for (int i = 0; i < m; ++i) {
         const std::size_t index =
@@ -1178,81 +1178,59 @@ void SuperAdmmSolver::updateWeights(
         const double upper =
             model_.u[index];
 
-        const double zi =
+        const double zValue =
             oldZ[index];
 
-        /*
-         * A constraint is considered active when z_i^k is
-         * exactly on a finite lower or upper bound.
-         */
         const bool atLower =
             std::isfinite(lower) &&
-            zi == lower;
+            zValue == lower;
 
         const bool atUpper =
             std::isfinite(upper) &&
-            zi == upper;
+            zValue == upper;
 
         const bool active =
-            atLower ||
-            atUpper;
+            atLower || atUpper;
 
-        double newRho =
-            0.0;
+        double newRho;
 
         if (active) {
-            /*
-             * Active constraint:
-             *
-             * R_i^{k+1}
-             * =
-             * min(b^{k+1}, alpha R_i^k)
-             */
             newRho =
                 std::min(
-                    b_,
+                    upperRho,
                     options_.alpha *
                         rho_[index]
                 );
         } else {
-            /*
-             * Inactive constraint:
-             *
-             * R_i^{k+1}
-             * =
-             * max(1/b^{k+1}, R_i^k / alpha)
-             */
             newRho =
                 std::max(
-                    1.0 / b_,
+                    lowerRho,
                     rho_[index] /
                         options_.alpha
                 );
         }
 
-        if (!std::isfinite(newRho) ||
-            newRho <= 0.0) {
-            return;
-        }
-
         /*
-         * Explicitly enforce the numerical stability interval.
+         * Explicitly enforce the numerical stability
+         * interval from the paper.
          */
         newRho =
-            std::max(
+            std::clamp(
                 newRho,
-                1.0 / b_
+                lowerRho,
+                upperRho
             );
 
-        newRho =
-            std::min(
-                newRho,
-                b_
-            );
+        if (!std::isfinite(newRho) ||
+            newRho <= 0.0) {
+            return false;
+        }
 
         rho_[index] =
             newRho;
     }
+
+    return true;
 }
 
 double SuperAdmmSolver::primalResidual() const {
@@ -1341,7 +1319,7 @@ double SuperAdmmSolver::kktResidual(
         model_.numConstraints();
 
     std::vector<double> Px;
-    std::vector<double> Atnu;
+    std::vector<double> ATnu;
     std::vector<double> Ax;
 
     model_.P.multiply(
@@ -1351,7 +1329,7 @@ double SuperAdmmSolver::kktResidual(
 
     model_.A.transposeMultiply(
         nu_,
-        Atnu
+        ATnu
     );
 
     model_.A.multiply(
@@ -1363,71 +1341,63 @@ double SuperAdmmSolver::kktResidual(
         0.0;
 
     /*
-     * Top KKT block:
+     * Top KKT equation:
      *
-     * (P + sigma I)x^{k+1}
-     * + A^T nu^{k+1}
+     * sigma*x^k - q
      *
-     * =
+     * -
      *
-     * sigma x^k - q
+     * ((P + sigma I)x^{k+1}
+     *      + A^T nu^{k+1})
      */
     for (int j = 0; j < n; ++j) {
         const std::size_t index =
             static_cast<std::size_t>(j);
 
-        const double lhs =
-            Px[index] +
-            options_.sigma *
-                x_[index] +
-            Atnu[index];
-
-        const double rhs =
+        const double residual =
             options_.sigma *
                 oldX[index] -
-            model_.q[index];
+            model_.q[index] -
+            (
+                Px[index] +
+                options_.sigma *
+                    x_[index] +
+                ATnu[index]
+            );
 
         epsilon =
             std::max(
                 epsilon,
-                std::abs(lhs - rhs)
+                std::abs(residual)
             );
     }
 
     /*
-     * Bottom KKT block:
+     * Bottom KKT equation:
      *
-     * A x^{k+1}
-     * - R^{-1} nu^{k+1}
+     * z^k - R^{-1}y^k
      *
-     * =
+     * -
      *
-     * z^k - R^{-1} y^k
+     * (Ax^{k+1} - R^{-1}nu^{k+1})
      */
     for (int i = 0; i < m; ++i) {
         const std::size_t index =
             static_cast<std::size_t>(i);
 
-        const double ri =
+        const double rho =
             rho_[index];
 
-        if (!std::isfinite(ri) ||
-            ri <= 0.0) {
-            return std::numeric_limits<double>::infinity();
-        }
-
-        const double lhs =
-            Ax[index] -
-            nu_[index] / ri;
-
-        const double rhs =
+        const double residual =
             oldZ[index] -
-            oldY[index] / ri;
+            oldY[index] / rho -
+            Ax[index] +
+            nu_[index] / rho;
 
         epsilon =
             std::max(
                 epsilon,
-                std::abs(lhs - rhs)
+                std::abs(residual)
             );
     }
 
@@ -1476,8 +1446,7 @@ bool SuperAdmmSolver::checkPrimalInfeasibility() {
         return false;
     }
 
-    if (previousY_.size() !=
-        y_.size()) {
+    if (previousY_.size() != y_.size()) {
         return false;
     }
 
@@ -1486,8 +1455,11 @@ bool SuperAdmmSolver::checkPrimalInfeasibility() {
         0.0
     );
 
-    bool hasNonzeroDirection =
+    bool nonzero =
         false;
+
+    double deltaYScale =
+        0.0;
 
     for (int i = 0; i < m; ++i) {
         const std::size_t index =
@@ -1497,29 +1469,22 @@ bool SuperAdmmSolver::checkPrimalInfeasibility() {
             y_[index] -
             previousY_[index];
 
+        deltaYScale =
+            std::max(
+                deltaYScale,
+                std::abs(deltaY[index])
+            );
+
         if (std::abs(deltaY[index]) >
             options_.infeasibilityTolerance) {
-            hasNonzeroDirection =
-                true;
+            nonzero = true;
         }
     }
 
-    if (!hasNonzeroDirection) {
+    if (!nonzero) {
         return false;
     }
 
-    /*
-     * Primal infeasibility certificate:
-     *
-     * A^T delta_y = 0
-     *
-     * and
-     *
-     * u^T delta_y_+
-     * +
-     * l^T delta_y_-
-     * < 0
-     */
     std::vector<double> ATdeltaY;
 
     model_.A.transposeMultiply(
@@ -1527,14 +1492,48 @@ bool SuperAdmmSolver::checkPrimalInfeasibility() {
         ATdeltaY
     );
 
+    double aNorm =
+        0.0;
+
+    const auto& aValues =
+        model_.A.csrValues();
+
+    for (double value : aValues) {
+        aNorm =
+            std::max(
+                aNorm,
+                std::abs(value)
+            );
+    }
+
+    const double directionTolerance =
+        options_.infeasibilityTolerance *
+        std::max(
+            1.0,
+            aNorm * deltaYScale
+        );
+
     for (double value : ATdeltaY) {
         if (std::abs(value) >
-            options_.infeasibilityTolerance) {
+            directionTolerance) {
             return false;
         }
     }
 
+    /*
+     * Certificate:
+     *
+     *     u^T deltaY_+
+     *   + l^T deltaY_-
+     *   < 0
+     *
+     * where deltaY_+ contains positive entries and
+     * deltaY_- contains negative entries.
+     */
     double certificate =
+        0.0;
+
+    double certificateScale =
         0.0;
 
     for (int i = 0; i < m; ++i) {
@@ -1557,11 +1556,13 @@ bool SuperAdmmSolver::checkPrimalInfeasibility() {
             certificate +=
                 upper * dy;
 
+            certificateScale +=
+                std::abs(upper * dy);
+
         } else if (
             dy <
             -options_.infeasibilityTolerance
         ) {
-
             const double lower =
                 model_.l[index];
 
@@ -1571,11 +1572,21 @@ bool SuperAdmmSolver::checkPrimalInfeasibility() {
 
             certificate +=
                 lower * dy;
+
+            certificateScale +=
+                std::abs(lower * dy);
         }
     }
 
+    const double certificateTolerance =
+        options_.infeasibilityTolerance *
+        std::max(
+            1.0,
+            certificateScale
+        );
+
     return certificate <
-           -options_.infeasibilityTolerance;
+           -certificateTolerance;
 }
 
 bool SuperAdmmSolver::checkDualInfeasibility() {
@@ -1590,8 +1601,7 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
         return false;
     }
 
-    if (previousX_.size() !=
-        x_.size()) {
+    if (previousX_.size() != x_.size()) {
         return false;
     }
 
@@ -1600,8 +1610,11 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
         0.0
     );
 
-    bool hasNonzeroDirection =
+    bool nonzero =
         false;
+
+    double deltaXScale =
+        0.0;
 
     for (int j = 0; j < n; ++j) {
         const std::size_t index =
@@ -1611,21 +1624,29 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
             x_[index] -
             previousX_[index];
 
+        deltaXScale =
+            std::max(
+                deltaXScale,
+                std::abs(deltaX[index])
+            );
+
         if (std::abs(deltaX[index]) >
             options_.infeasibilityTolerance) {
-            hasNonzeroDirection =
-                true;
+            nonzero = true;
         }
     }
 
-    if (!hasNonzeroDirection) {
+    if (!nonzero) {
         return false;
     }
 
     /*
-     * q^T delta_x < 0
+     * q^T deltaX < 0.
      */
     double qDeltaX =
+        0.0;
+
+    double qScale =
         0.0;
 
     for (int j = 0; j < n; ++j) {
@@ -1635,15 +1656,28 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
         qDeltaX +=
             model_.q[index] *
             deltaX[index];
+
+        qScale +=
+            std::abs(
+                model_.q[index] *
+                deltaX[index]
+            );
     }
 
+    const double qTolerance =
+        options_.infeasibilityTolerance *
+        std::max(
+            1.0,
+            qScale
+        );
+
     if (qDeltaX >=
-        -options_.infeasibilityTolerance) {
+        -qTolerance) {
         return false;
     }
 
     /*
-     * P delta_x = 0
+     * P deltaX = 0.
      */
     std::vector<double> PdeltaX;
 
@@ -1652,9 +1686,29 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
         PdeltaX
     );
 
-    for (double value : PdeltaX) {
+    double pNorm =
+        0.0;
+
+    for (double value :
+         model_.P.csrValues()) {
+        pNorm =
+            std::max(
+                pNorm,
+                std::abs(value)
+            );
+    }
+
+    const double pTolerance =
+        options_.infeasibilityTolerance *
+        std::max(
+            1.0,
+            pNorm * deltaXScale
+        );
+
+    for (double value :
+         PdeltaX) {
         if (std::abs(value) >
-            options_.infeasibilityTolerance) {
+            pTolerance) {
             return false;
         }
     }
@@ -1663,20 +1717,16 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
      * Constraint-direction conditions:
      *
      * finite lower + finite upper:
-     *
-     *     A_i delta_x = 0
+     *     A_i deltaX = 0
      *
      * finite lower + infinite upper:
-     *
-     *     A_i delta_x >= 0
+     *     A_i deltaX >= 0
      *
      * infinite lower + finite upper:
+     *     A_i deltaX <= 0
      *
-     *     A_i delta_x <= 0
-     *
-     * infinite lower + infinite upper:
-     *
-     *     no restriction
+     * both infinite:
+     *     no restriction.
      */
     if (m > 0) {
         std::vector<double> AdeltaX;
@@ -1686,11 +1736,30 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
             AdeltaX
         );
 
+        double aNorm =
+            0.0;
+
+        for (double value :
+             model_.A.csrValues()) {
+            aNorm =
+                std::max(
+                    aNorm,
+                    std::abs(value)
+                );
+        }
+
+        const double aTolerance =
+            options_.infeasibilityTolerance *
+            std::max(
+                1.0,
+                aNorm * deltaXScale
+            );
+
         for (int i = 0; i < m; ++i) {
             const std::size_t index =
                 static_cast<std::size_t>(i);
 
-            const double a =
+            const double value =
                 AdeltaX[index];
 
             const bool lowerFinite =
@@ -1706,8 +1775,8 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
             if (lowerFinite &&
                 upperFinite) {
 
-                if (std::abs(a) >
-                    options_.infeasibilityTolerance) {
+                if (std::abs(value) >
+                    aTolerance) {
                     return false;
                 }
 
@@ -1716,8 +1785,8 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
                 !upperFinite
             ) {
 
-                if (a <
-                    -options_.infeasibilityTolerance) {
+                if (value <
+                    -aTolerance) {
                     return false;
                 }
 
@@ -1726,8 +1795,8 @@ bool SuperAdmmSolver::checkDualInfeasibility() {
                 upperFinite
             ) {
 
-                if (a >
-                    options_.infeasibilityTolerance) {
+                if (value >
+                    aTolerance) {
                     return false;
                 }
             }

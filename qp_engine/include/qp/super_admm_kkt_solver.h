@@ -14,13 +14,12 @@ namespace qp {
  *     [ P + sigma I      A^T ] [x ] = [rhsX ]
  *     [ A             -R^-1 ] [nu]   [rhsNu]
  *
- * where R is a positive diagonal matrix containing the
- * per-constraint SuperADMM penalty weights.
+ * where R is a positive diagonal matrix containing
+ * the per-constraint SuperADMM penalty weights.
  *
- * The current implementation uses a dense LU factorization with
- * partial pivoting. This is intended as a correctness-first
- * reference implementation. It is not intended to be the
- * high-performance sparse backend for large-scale QPs.
+ * This implementation uses dense LU factorization with
+ * partial pivoting. It is intended as a correctness-first
+ * reference implementation.
  */
 class SuperAdmmKktSolver {
 public:
@@ -30,9 +29,9 @@ public:
      * @brief Solve one SuperADMM KKT system.
      *
      * @param rho    Diagonal entries of R.
-     * @param sigma  Positive regularization parameter.
-     * @param rhsX   Right-hand side corresponding to x.
-     * @param rhsNu  Right-hand side corresponding to nu.
+     * @param sigma  Positive proximal regularization.
+     * @param rhsX   Right-hand side for the x block.
+     * @param rhsNu  Right-hand side for the nu block.
      * @param x      Solution vector for x.
      * @param nu     Solution vector for nu.
      *
