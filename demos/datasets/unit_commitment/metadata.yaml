@@ -1,0 +1,8 @@
+﻿name: unit_commitment
+category: unit_commitment
+problem_class: MIQP
+source: TBD
+format: TBD
+description: Public mixed-integer quadratic programming unit-commitment benchmark.
+raw_file: TBD
+processed_file: TBD

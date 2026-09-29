@@ -1,0 +1,8 @@
+﻿name: ex8_3_13
+category: reactor_optimization
+problem_class: NLP
+source: MINLPLib
+format: TBD
+description: Nonlinear reactor/process optimization benchmark.
+raw_file: ex8_3_13
+processed_file: ex8_3_13_processed

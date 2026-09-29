@@ -365,3 +365,6 @@ foreach(optimsolver_test_target IN ITEMS
     test_branching pdlp_tests qp_tests)
     optimsolver_enable_assertions(${optimsolver_test_target})
 endforeach()
+
+# Demo applications
+add_subdirectory(demos)

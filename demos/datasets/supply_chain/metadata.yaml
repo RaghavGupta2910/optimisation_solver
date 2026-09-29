@@ -1,0 +1,8 @@
+﻿name: shs1023
+category: supply_chain
+problem_class: MILP
+source: MIPLIB
+format: MPS
+description: Supply-chain and logistics mixed-integer optimization benchmark.
+raw_file: shs1023.mps
+processed_file: shs1023_processed.mps

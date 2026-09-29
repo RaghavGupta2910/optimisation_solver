@@ -1,0 +1,8 @@
+﻿name: qp3
+category: portfolio_optimization
+problem_class: QP
+source: MINLPLib
+format: MPS
+description: Continuous quadratic programming benchmark used for portfolio optimization.
+raw_file: qp3.mps
+processed_file: qp3_processed.mps

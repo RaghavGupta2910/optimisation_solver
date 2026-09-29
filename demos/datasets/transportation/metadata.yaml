@@ -1,0 +1,8 @@
+name: mpstrans
+category: transportation
+problem_class: LP
+source: GAMS Model Library / Dantzig transportation problem
+format: MPS
+description: Classical Dantzig transportation problem with 2 supply plants and 3 markets.
+raw_file: mpstrans.mps
+processed_file: mpstrans_processed.mps
