@@ -62,19 +62,6 @@ target_link_libraries(portfolio_qp
         qp_engine
 )
 
-# ------------------------------------------------------------
-# SuperADMM - Portfolio
-# ------------------------------------------------------------
-add_executable(portfolio_superadmm
-    qp_superadmm/portfolio/main.cpp
-    qp_superadmm/portfolio/convergence.cpp
-)
-
-target_link_libraries(portfolio_superadmm
-    PRIVATE
-        demo_common
-        qp_engine
-)
 
 # ------------------------------------------------------------
 # MIQP - Unit Commitment
@@ -109,10 +96,10 @@ set_target_properties(
     supply_chain_milp
     transportation_pdlp
     portfolio_qp
-    portfolio_superadmm
     unit_commitment_miqp
     reactor_optimization_nlp
     PROPERTIES
         FOLDER "Demos"
 )
+
 
