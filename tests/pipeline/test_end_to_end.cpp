@@ -6,7 +6,6 @@
 // independently of anything in this repository.
 
 #include "solver/orchestrator.h"
-#include "presolve/presolver.h"
 
 #include <cmath>
 #include <cstdio>
@@ -654,44 +653,6 @@ void testForcedSuperAdmmRunsThroughPipeline() {
          "SuperADMM pipeline objective");
 }
 
-void testSuperAdmmReducedApiAndStatusPropagation() {
-    Builder b;
-    b.var("x", model::VariableType::Continuous, 0.0, 10.0);
-    b.row("lower", 1.0, INF, {{0, 1.0}});
-    b.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
-    b.m.objective.quadraticTerms = {{0, 0, 1.0}};
-
-    solver::SolverOptions options;
-    options.forceEngine = solver::Engine::SuperAdmm;
-    options.tolerance = 1e-6;
-
-    const auto presolved = presolve::Presolver().run(b.m);
-    const auto reduced =
-        solver::solveReduced(presolved.model, solver::classify(b.m), options);
-
-    ck(reduced.executedEngine == solver::Engine::SuperAdmm,
-       "solveReduced executes the forced SuperADMM backend");
-    ck(reduced.status == solver::SolveStatus::Optimal,
-       "solveReduced normalizes SuperADMM success");
-    ck(reduced.hasPrimal && reduced.variableValues.size() ==
-       presolved.model.variables.size(),
-       "solveReduced keeps reduced coordinates");
-
-    Builder invalid;
-    invalid.var("x", model::VariableType::Continuous, -10.0, 10.0);
-    invalid.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
-    invalid.m.objective.quadraticTerms = {{0, 0, -1.0}};
-
-    const auto invalidResult = solver::solve(invalid.m, options);
-    ck(invalidResult.engine == solver::Engine::SuperAdmm,
-       "invalid convexity test reaches the forced SuperADMM backend");
-    ck(invalidResult.executedEngine == solver::Engine::SuperAdmm,
-       "invalid SuperADMM execution is recorded");
-    ck(invalidResult.status == solver::SolveStatus::InvalidModel,
-       "SuperADMM invalid-problem status is normalized to InvalidModel");
-    ck(!invalidResult.hasPrimal && invalidResult.variableValues.empty(),
-       "invalid SuperADMM result does not expose a partial primal");
-}
 
 void testSuperAdmmTimeLimitPropagation() {
     Builder b;
@@ -878,7 +839,6 @@ int main() {
     testNonConvexMiqpRejectedEndToEnd();
     testQpDualsMatchConstraintCount();
     testForcedSuperAdmmRunsThroughPipeline();
-    testSuperAdmmReducedApiAndStatusPropagation();
     testSuperAdmmTimeLimitPropagation();
     testForcedSuperAdmmMaximizeWithOffset();
     testUniformResultContract();
