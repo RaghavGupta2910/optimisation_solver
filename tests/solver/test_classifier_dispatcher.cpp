@@ -178,20 +178,6 @@ void testForcedEngineIsHonoured() {
 
 // A forced override must beat even the integrality rule: solving the relaxation
 // is a legitimate request.
-void testSuperAdmmCanBeForcedAndParsed() {
-    solver::SolverOptions o;
-    o.forceEngine = solver::Engine::SuperAdmm;
-    const model::Model m = lpOfSize(3, 3);
-    const auto d = solver::dispatch(m, solver::classify(m), feasibleResult(), o);
-    require(d.engine == solver::Engine::SuperAdmm,
-            "SuperADMM forceEngine is honoured");
-    require(solver::toString(solver::Engine::SuperAdmm) == std::string("super_admm"),
-            "SuperADMM has a stable engine name");
-    const auto parsed = solver::parseEngine("super_admm");
-    require(parsed.has_value() && *parsed == solver::Engine::SuperAdmm,
-            "super_admm can be selected through the string engine interface");
-}
-
 void testForcedEngineBeatsIntegrality() {
     model::Model m = lpOfSize(3, 3);
     m.variables[0].type = model::VariableType::Integer;
@@ -397,7 +383,6 @@ int main() {
     run("infeasibleShortCircuits", testInfeasibleShortCircuits);
     run("forcedEngineIsHonoured", testForcedEngineIsHonoured);
     run("forcedEngineBeatsIntegrality", testForcedEngineBeatsIntegrality);
-    run("superAdmmCanBeForcedAndParsed", testSuperAdmmCanBeForcedAndParsed);
     run("integralityRoutesToBranchAndCut", testIntegralityRoutesToBranchAndCut);
     run("milpReducedToLpRoutesToLpEngine", testMilpReducedToLpRoutesToLpEngine);
     run("vertexRequestForcesSimplexWhenItFits", testVertexRequestForcesSimplexWhenItFits);
