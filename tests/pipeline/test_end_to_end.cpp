@@ -6,6 +6,7 @@
 // independently of anything in this repository.
 
 #include "solver/orchestrator.h"
+#include "presolve/presolver.h"
 
 #include <cmath>
 #include <cstdio>
