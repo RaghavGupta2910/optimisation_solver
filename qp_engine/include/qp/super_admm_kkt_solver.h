@@ -6,37 +6,27 @@
 
 namespace qp {
 
-/**
- * @brief Direct KKT solver used by SuperADMM.
- *
- * Solves the SuperADMM linear system
- *
- *     [ P + sigma I      A^T ] [x ] = [rhsX ]
- *     [ A             -R^-1 ] [nu]   [rhsNu]
- *
- * where R is a positive diagonal matrix containing
- * the per-constraint SuperADMM penalty weights.
- *
- * This implementation uses dense LU factorization with
- * partial pivoting. It is intended as a correctness-first
- * reference implementation.
- */
+// -----------------------------------------------------------------------------
+// Direct SuperADMM KKT solver
+//
+// Solves
+//
+//   [ P + sigma I     A^T ] [ x  ]   [ rhsX  ]
+//   [ A              -R^-1] [ nu ] = [ rhsNu ]
+//
+// where R is diagonal and supplied as a vector containing its diagonal.
+//
+// This implementation deliberately uses a dense LU factorisation.
+// It is a correctness-first/reference implementation for validating
+// SuperADMM. It is not intended for large-scale sparse QPs.
+//
+// A sparse LDLT/KKT implementation can be added later without changing
+// the SuperAdmmSolver interface.
+// -----------------------------------------------------------------------------
 class SuperAdmmKktSolver {
 public:
     explicit SuperAdmmKktSolver(const QpModel& model);
 
-    /**
-     * @brief Solve one SuperADMM KKT system.
-     *
-     * @param rho    Diagonal entries of R.
-     * @param sigma  Positive proximal regularization.
-     * @param rhsX   Right-hand side for the x block.
-     * @param rhsNu  Right-hand side for the nu block.
-     * @param x      Solution vector for x.
-     * @param nu     Solution vector for nu.
-     *
-     * @return true if the system was solved successfully.
-     */
     bool solve(
         const std::vector<double>& rho,
         double sigma,

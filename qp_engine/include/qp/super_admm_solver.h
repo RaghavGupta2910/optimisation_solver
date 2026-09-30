@@ -8,21 +8,17 @@
 
 namespace qp {
 
-/**
- * @brief Options for the SuperADMM solver.
- *
- * The SuperADMM-specific defaults follow the paper:
- *
- *     alpha = 500
- *     sigma = 1e-6
- *     b0    = 1e8
- *     tau   = 0.5
- *
- * rho0 is the initial diagonal entry of R.
- */
+// -----------------------------------------------------------------------------
+// SuperADMM options.
+//
+// Defaults follow the SuperADMM paper:
+//   alpha = 500
+//   sigma = 1e-6
+//   b0    = 1e8
+//   tau   = 0.5
+// -----------------------------------------------------------------------------
 struct SuperAdmmOptions {
     std::int64_t iterationLimit = 5000;
-
     double timeLimitSeconds = 0.0;
 
     double primalTolerance = 1e-6;
@@ -38,22 +34,23 @@ struct SuperAdmmOptions {
     double infeasibilityTolerance = 1e-8;
 };
 
-/**
- * @brief Direct SuperADMM solver for convex quadratic programs.
- *
- * Solves
- *
- *     minimize  0.5 x^T P x + q^T x
- *
- *     subject to
- *
- *         l <= A x <= u
- *
- * using the direct KKT formulation of SuperADMM.
- *
- * The existing standard ADMM solver is intentionally left
- * untouched. SuperADMM is exposed as a separate solver.
- */
+// -----------------------------------------------------------------------------
+// SuperADMM solver.
+//
+// Solves
+//
+//   minimize    0.5 x^T P x + q^T x
+//   subject to  l <= A x <= u
+//
+// using the direct SuperADMM formulation.
+//
+// This solver is intentionally standalone in the current implementation.
+// Integration with the main solver dispatcher/orchestrator is deferred so
+// that the SuperADMM algorithm can be validated independently.
+//
+// The current KKT backend is dense and correctness-first. It is not intended
+// as the scalable sparse production backend for large QPs.
+// -----------------------------------------------------------------------------
 class SuperAdmmSolver {
 public:
     explicit SuperAdmmSolver(
@@ -74,12 +71,12 @@ private:
         std::vector<double>& zNew
     ) const;
 
-    bool updateBound(
+    void updateBound(
         double epsilon,
         double primalResidual
     );
 
-    bool updateWeights(
+    void updateWeights(
         const std::vector<double>& oldZ
     );
 
@@ -105,10 +102,6 @@ private:
         const std::vector<double>& values
     ) const;
 
-    bool validateConvexObjective() const;
-
-    bool validateZeroVariableProblem() const;
-
 private:
     const QpModel& model_;
     SuperAdmmOptions options_;
@@ -121,20 +114,13 @@ private:
     std::vector<double> nu_;
     std::vector<double> zTilde_;
 
-    /*
-     * Diagonal entries of R.
-     */
+    // Diagonal entries of R.
     std::vector<double> rho_;
 
-    /*
-     * Numerical stability bound b^k.
-     */
+    // Numerical stability bound b^k.
     double b_ = 0.0;
 
-    /*
-     * Previous iterates used by the infeasibility
-     * certificates.
-     */
+    // Previous iterate for infeasibility certificates.
     std::vector<double> previousX_;
     std::vector<double> previousY_;
 
