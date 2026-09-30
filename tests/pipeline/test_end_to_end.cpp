@@ -714,6 +714,36 @@ void testSuperAdmmTimeLimitPropagation() {
        "SuperADMM time limit is normalized to LimitReached");
 }
 
+
+void testForcedSuperAdmmMaximizeWithOffset() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, INF);
+    b.var("y", model::VariableType::Continuous, 0.0, INF);
+    b.row("c0", -INF, 2.0, {{0, 1.0}, {1, 1.0}});
+    b.obj(model::ObjectiveSense::Maximize, {{0, 2.0}, {1, 4.0}}, -30.0);
+    b.m.objective.quadraticTerms = {{0, 0, -1.0}, {1, 1, -1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.tolerance = 1e-6;
+
+    const auto r = solver::solve(b.m, options);
+    report("forced SuperADMM max QP with offset", r);
+
+    ck(r.engine == solver::Engine::SuperAdmm,
+       "maximize QP is explicitly dispatched to SuperADMM");
+    ck(r.executedEngine == solver::Engine::SuperAdmm,
+       "maximize QP actually executes SuperADMM");
+    ck(r.status == solver::SolveStatus::Optimal,
+       std::string("SuperADMM maximize QP is optimal: ") + r.message);
+    near(r.variableValues[0], 0.5, 1e-4,
+         "SuperADMM maximize QP x");
+    near(r.variableValues[1], 1.5, 1e-4,
+         "SuperADMM maximize QP y");
+    near(r.objectiveValue, -25.5, 1e-4,
+         "SuperADMM maximize QP objective offset");
+}
+
 void testQpDiagonalQuadraticCoefficient() {
     Builder b;
     b.var("x", model::VariableType::Continuous, -100.0, 100.0);
@@ -849,6 +879,7 @@ int main() {
     testForcedSuperAdmmRunsThroughPipeline();
     testSuperAdmmReducedApiAndStatusPropagation();
     testSuperAdmmTimeLimitPropagation();
+    testForcedSuperAdmmMaximizeWithOffset();
     testUniformResultContract();
 
     std::printf("\n%d checks, %d failures\n", checks, failures);
