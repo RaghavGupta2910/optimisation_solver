@@ -623,6 +623,97 @@ void testMaximizeQpWithObjectiveOffset() {
 // If P_ii were set to q_ii instead of 2*q_ii the engine would minimise
 // 1.5x^2 - 12x, giving x = 4 and -24 -- so this discriminates the convention
 // rather than merely checking that something was solved.
+
+void testForcedSuperAdmmRunsThroughPipeline() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, 10.0);
+    b.row("lower", 1.0, INF, {{0, 1.0}});
+    b.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
+    b.m.objective.quadraticTerms = {{0, 0, 1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.tolerance = 1e-6;
+
+    const auto r = solver::solve(b.m, options);
+    report("forced SuperADMM", r);
+
+    ck(r.engine == solver::Engine::SuperAdmm,
+       "dispatcher selects SuperADMM when explicitly forced");
+    ck(r.executedEngine == solver::Engine::SuperAdmm,
+       "orchestrator records SuperADMM as the executed engine");
+    ck(r.status == solver::SolveStatus::Optimal,
+       std::string("SuperADMM pipeline solve is optimal: ") + r.message);
+    ck(r.hasPrimal, "SuperADMM pipeline publishes a primal solution");
+    ck(r.variableValues.size() == b.m.variables.size(),
+       "SuperADMM primal is normalized to original variable coordinates");
+    near(r.variableValues[0], 1.0, 1e-4,
+         "SuperADMM pipeline solution");
+    near(r.objectiveValue, 0.5, 1e-4,
+         "SuperADMM pipeline objective");
+}
+
+void testSuperAdmmReducedApiAndStatusPropagation() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, 10.0);
+    b.row("lower", 1.0, INF, {{0, 1.0}});
+    b.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
+    b.m.objective.quadraticTerms = {{0, 0, 1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.tolerance = 1e-6;
+
+    const auto presolved = presolve::Presolver().run(b.m);
+    const auto reduced =
+        solver::solveReduced(presolved.model, solver::classify(b.m), options);
+
+    ck(reduced.executedEngine == solver::Engine::SuperAdmm,
+       "solveReduced executes the forced SuperADMM backend");
+    ck(reduced.status == solver::SolveStatus::Optimal,
+       "solveReduced normalizes SuperADMM success");
+    ck(reduced.hasPrimal && reduced.variableValues.size() ==
+       presolved.model.variables.size(),
+       "solveReduced keeps reduced coordinates");
+
+    Builder invalid;
+    invalid.var("x", model::VariableType::Continuous, -10.0, 10.0);
+    invalid.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
+    invalid.m.objective.quadraticTerms = {{0, 0, -1.0}};
+
+    const auto invalidResult = solver::solve(invalid.m, options);
+    ck(invalidResult.engine == solver::Engine::SuperAdmm,
+       "invalid convexity test reaches the forced SuperADMM backend");
+    ck(invalidResult.executedEngine == solver::Engine::SuperAdmm,
+       "invalid SuperADMM execution is recorded");
+    ck(invalidResult.status == solver::SolveStatus::InvalidModel,
+       "SuperADMM invalid-problem status is normalized to InvalidModel");
+    ck(!invalidResult.hasPrimal && invalidResult.variableValues.empty(),
+       "invalid SuperADMM result does not expose a partial primal");
+}
+
+void testSuperAdmmTimeLimitPropagation() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, 10.0);
+    b.row("lower", 1.0, INF, {{0, 1.0}});
+    b.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
+    b.m.objective.quadraticTerms = {{0, 0, 1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.timeLimitSeconds = 1e-30;
+
+    const auto r = solver::solve(b.m, options);
+    report("SuperADMM time limit", r);
+
+    ck(r.engine == solver::Engine::SuperAdmm,
+       "time-limited solve remains attributed to SuperADMM");
+    ck(r.executedEngine == solver::Engine::SuperAdmm,
+       "time-limited SuperADMM execution is recorded");
+    ck(r.status == solver::SolveStatus::LimitReached,
+       "SuperADMM time limit is normalized to LimitReached");
+}
+
 void testQpDiagonalQuadraticCoefficient() {
     Builder b;
     b.var("x", model::VariableType::Continuous, -100.0, 100.0);
@@ -755,6 +846,9 @@ int main() {
     testPresolveToMiqp();
     testNonConvexMiqpRejectedEndToEnd();
     testQpDualsMatchConstraintCount();
+    testForcedSuperAdmmRunsThroughPipeline();
+    testSuperAdmmReducedApiAndStatusPropagation();
+    testSuperAdmmTimeLimitPropagation();
     testUniformResultContract();
 
     std::printf("\n%d checks, %d failures\n", checks, failures);
