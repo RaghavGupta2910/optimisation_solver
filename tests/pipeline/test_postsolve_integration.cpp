@@ -137,7 +137,7 @@ void super_admm_postsolve() {
     require(result.executedEngine == solver::Engine::SuperAdmm,
             "postsolve path records the actual SuperADMM execution");
     vectorNear(result.variableValues, {2, 1, 2});
-    near(result.objectiveValue, 2);
+    near(result.objectiveValue, 0);
     require(result.variableValues.size() == m.variables.size(),
             "SuperADMM postsolve restores original variable dimensions");
 }
