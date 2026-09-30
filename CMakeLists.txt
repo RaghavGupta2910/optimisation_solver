@@ -160,9 +160,8 @@ option(PDLP_BUILD_TESTS "Build the PDLP test suite" ON)
 option(QP_BUILD_TESTS "Build the QP test suite" ON)
 add_subdirectory(pdlp_engine)
 
-# Branch-and-cut over a dual simplex, ADMM for convex QP, and SuperADMM as an
-# alternative convex-QP backend. Each engine builds its own tests, so `ctest`
-# from the root covers all engine and pipeline tests.
+# Branch-and-cut over a dual simplex, and ADMM for convex QP. Both build their
+# own tests, so `ctest` from the root covers all three engines.
 add_subdirectory(milp_engine)
 add_subdirectory(qp_engine)
 if(OPTIMSOLVER_REQUIRE_CUDA_TEST_DEVICE AND NOT (PDLP_ENABLE_CUDA OR QP_ENABLE_CUDA))
@@ -213,7 +212,7 @@ add_test(NAME test_pdlp_adapter COMMAND test_pdlp_adapter)
 # The orchestrator is the one entry point a caller needs: it classifies, runs
 # presolve, dispatches to whichever engine the decision names, and normalises
 # every engine's result into a single SolveResult. It is therefore the only
-# target that links all solver engines at once.
+# target that links all three engines at once.
 add_library(solver_orchestrator
     src/solver/orchestrator.cpp
     src/solver/crossover.cpp
@@ -274,7 +273,7 @@ add_test(NAME test_mps_miqp
 
 add_executable(test_postsolve_integration tests/pipeline/test_postsolve_integration.cpp)
 target_link_libraries(test_postsolve_integration PRIVATE solver_orchestrator)
-foreach(case IN ITEMS lp_engines qp_signs super_admm_postsolve all_eliminated bound_only integer_models
+foreach(case IN ITEMS lp_engines qp_signs all_eliminated bound_only integer_models
     unavailable_duals failure_statuses limit_no_solution limit_feasible_solution reduced_api)
     add_test(NAME PostsolveIntegration_${case} COMMAND test_postsolve_integration ${case})
 endforeach()
