@@ -160,8 +160,9 @@ option(PDLP_BUILD_TESTS "Build the PDLP test suite" ON)
 option(QP_BUILD_TESTS "Build the QP test suite" ON)
 add_subdirectory(pdlp_engine)
 
-# Branch-and-cut over a dual simplex, and ADMM for convex QP. Both build their
-# own tests, so `ctest` from the root covers all three engines.
+# Branch-and-cut over a dual simplex, ADMM for convex QP, and SuperADMM as an
+# alternative convex-QP backend. Each engine builds its own tests, so `ctest`
+# from the root covers all engine and pipeline tests.
 add_subdirectory(milp_engine)
 add_subdirectory(qp_engine)
 if(OPTIMSOLVER_REQUIRE_CUDA_TEST_DEVICE AND NOT (PDLP_ENABLE_CUDA OR QP_ENABLE_CUDA))
