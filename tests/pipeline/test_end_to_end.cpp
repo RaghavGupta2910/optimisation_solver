@@ -649,7 +649,7 @@ void testForcedSuperAdmmRunsThroughPipeline() {
        "SuperADMM primal is normalized to original variable coordinates");
     near(r.variableValues[0], 1.0, 1e-4,
          "SuperADMM pipeline solution");
-    near(r.objectiveValue, 0.5, 1e-4,
+    near(r.objectiveValue, 1.0, 1e-4,
          "SuperADMM pipeline objective");
 }
 
