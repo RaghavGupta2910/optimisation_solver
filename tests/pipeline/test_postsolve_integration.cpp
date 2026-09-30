@@ -110,6 +110,38 @@ void qp_signs() {
     }
 }
 
+
+void super_admm_postsolve() {
+    model::Model m;
+    m.variables = {
+        var("fixed", 2, 2),
+        var("x", 0, 10),
+        var("y", 0, 10)
+    };
+    m.objective.sense = model::ObjectiveSense::Minimize;
+    m.objective.offset = 5;
+    m.objective.quadraticTerms = {{1, 1, 1.0}, {2, 2, 1.0}};
+    m.objective.linearTerms = {{1, -2.0}, {2, -4.0}};
+    m.constraints = {
+        row("demand", 3.0, INF, {{1, 1.0}, {2, 1.0}})
+    };
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.tolerance = 1e-6;
+
+    const auto result = solver::solve(m, options);
+    optimal(result);
+    require(result.engine == solver::Engine::SuperAdmm,
+            "postsolve path keeps the selected SuperADMM engine");
+    require(result.executedEngine == solver::Engine::SuperAdmm,
+            "postsolve path records the actual SuperADMM execution");
+    vectorNear(result.variableValues, {2, 1, 2});
+    near(result.objectiveValue, 2);
+    require(result.variableValues.size() == m.variables.size(),
+            "SuperADMM postsolve restores original variable dimensions");
+}
+
 void all_eliminated() {
     // f=7+5x+2y^2+xy at x=3,y=2 is 36. grad=(7,11), row 2y=4
     // has price 5.5. The engine input is empty, yet both originals must return.
@@ -313,7 +345,7 @@ void reduced_api() {
 
 int main(int argc, char** argv) {
     struct Test { const char* name; void (*run)(); };
-    const Test tests[] = {{"lp_engines", lp_engines}, {"qp_signs", qp_signs},
+    const Test tests[] = {{"lp_engines", lp_engines}, {"qp_signs", qp_signs}, {"super_admm_postsolve", super_admm_postsolve},
         {"all_eliminated", all_eliminated}, {"bound_only", bound_only},
         {"integer_models", integer_models}, {"unavailable_duals", unavailable_duals},
         {"failure_statuses", failure_statuses}, {"limit_no_solution", limit_no_solution},
