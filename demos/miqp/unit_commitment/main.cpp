@@ -47,9 +47,10 @@ int main(int argc, char* argv[]) {
             "MIQP Unit Commitment Result");
 
         if (!demos::solveSucceeded(result)) {
-            std::cout
+            std::cerr
                 << "\nMIQP backend boundary reached. "
                    "The instance was not silently relaxed.\n";
+            return 1;
         }
 
         return 0;
