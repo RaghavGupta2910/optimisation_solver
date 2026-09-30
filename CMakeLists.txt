@@ -213,7 +213,7 @@ add_test(NAME test_pdlp_adapter COMMAND test_pdlp_adapter)
 # The orchestrator is the one entry point a caller needs: it classifies, runs
 # presolve, dispatches to whichever engine the decision names, and normalises
 # every engine's result into a single SolveResult. It is therefore the only
-# target that links all three engines at once.
+# target that links all solver engines at once.
 add_library(solver_orchestrator
     src/solver/orchestrator.cpp
     src/solver/crossover.cpp
