@@ -44,9 +44,9 @@ struct SuperAdmmOptions {
 //
 // using the direct SuperADMM formulation.
 //
-// This solver is intentionally standalone in the current implementation.
-// Integration with the main solver dispatcher/orchestrator is deferred so
-// that the SuperADMM algorithm can be validated independently.
+// The solver is integrated with the main solver dispatcher/orchestrator
+// through an explicit Engine::SuperAdmm selection. Automatic QP dispatch
+// remains on Engine::Qp so existing large-QP behaviour is unchanged.
 //
 // The current KKT backend is dense and correctness-first. It is not intended
 // as the scalable sparse production backend for large QPs.
