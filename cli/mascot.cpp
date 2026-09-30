@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #include <io.h>
 #else
 #include <unistd.h>
@@ -20,7 +20,7 @@ namespace cli {
 namespace {
 
 bool isTty(const std::ostream& stream) {
-#ifdef _MSC_VER
+#ifdef _WIN32
     if (&stream == &std::cout) {
         return _isatty(_fileno(stdout)) != 0;
     }
@@ -221,7 +221,7 @@ void printSolveHelp(std::ostream& out) {
     out << "  <model.mps>             Path to input problem file in MPS format (required)\n\n";
     out << s.bold() << "Options" << s.reset() << "\n";
     out << "  --solver <name>         Force a specific solver engine:\n";
-    out << "                          pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp\n";
+    out << "                          pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp, super_admm\n";
     out << "  --time-limit <seconds>  Maximum solve time budget in seconds (positive number)\n";
     out << "  --output <file>         Write reconstructed original-space solution to file\n";
     out << "  --backend <name>        Compute backend for PDLP/QP: auto (default), cpu, cuda\n";
@@ -291,17 +291,21 @@ void animateSolveProgress(std::ostream& out, const TerminalStyle& s, const std::
     if (!s.color) {
         return;
     }
+
     static const char* frames[] = {"⠋", "⠙", "⠹", "⠸"};
+
     for (int i = 0; i < 4; ++i) {
         out << "\r  " << s.boldCyan() << frames[i] << " " << s.reset()
             << s.dim() << stage << s.reset() << std::flush;
         std::this_thread::sleep_for(std::chrono::microseconds(30000));
     }
+
     out << "\r\033[K" << std::flush;
 }
 
 void printInteractiveMenu(std::ostream& out, const TerminalStyle& s, bool hasModel) {
     out << s.bold() << "  MAIN MENU" << s.reset() << "\n\n";
+
     if (hasModel) {
         out << "  " << s.boldCyan() << "[1]" << s.reset() << "  Solve Current Model\n";
         out << "  " << s.boldCyan() << "[2]" << s.reset() << "  Open Another Model\n";
@@ -337,6 +341,7 @@ void printSolveDashboard(std::ostream& out, const SolveDashboardInfo& info, cons
 
     std::string redPlain;
     std::string redStyled;
+
     if (info.presolveInfeasible) {
         redPlain = "Reduced    infeasible in presolve";
         redStyled = s.dim() + "Reduced" + s.reset() + "    infeasible in presolve";
@@ -384,20 +389,25 @@ void printSolveDashboard(std::ostream& out, const SolveDashboardInfo& info, cons
     std::size_t innerWidth = std::max(static_cast<std::size_t>(50), maxPlainLen);
     std::size_t totalWidth = innerWidth + 6;
 
-    // Use Unicode box drawing horizontal dash '─'
     std::string hDash;
     for (std::size_t i = 0; i < totalWidth - 16; ++i) {
         hDash += "─";
     }
+<<<<<<< HEAD
     // Title "KAIRO" is 5 columns; "╭─ " + title + " " + hDash + "╮" spans totalWidth.
     for (int i = 0; i < 6; ++i) hDash += "─";
     std::string topBorder = s.dim() + "╭─" + s.reset() + " " + s.boldCyan() + "KAIRO" + s.reset() + " " +
+=======
+
+    std::string topBorder = s.dim() + "╭─" + s.reset() + " " + s.boldCyan() + "OPTIMSOLVER" + s.reset() + " " +
+>>>>>>> 9cf2e0e (Make CLI mascot portable on Windows)
                             s.dim() + hDash + "╮" + s.reset();
 
     std::string hDashBot;
     for (std::size_t i = 0; i < totalWidth - 2; ++i) {
         hDashBot += "─";
     }
+
     std::string botBorder = s.dim() + "╰" + hDashBot + "╯" + s.reset();
 
     out << topBorder << "\n";
@@ -406,6 +416,7 @@ void printSolveDashboard(std::ostream& out, const SolveDashboardInfo& info, cons
         out << s.dim() << "│" << s.reset() << "  " << line.styled << std::string(pad, ' ')
             << "  " << s.dim() << "│" << s.reset() << "\n";
     }
+
     out << botBorder << "\n\n";
 }
 
