@@ -1,45 +1,39 @@
-#include "solver/orchestrator.h"
-
-#include "adapter/pdlp_adapter.h"
-#include "barrier/barrier_adapter.h"
-#include "solver/crossover.h"
-#include "qp/convexity.h"
-#include "milp/branch_and_bound.h"
-#include "milp/dual_simplex_solver.h"
-#include "miqp/branch_and_bound.h"
-#include "pdlp/pdlp_solver.h"
-#include "qp/qp_adapter.h"
-#include "qp/qp_solver.h"
-#include "presolve/presolver.h"
-#include "postsolve/postsolver.h"
-
-#include <algorithm>
-#include <chrono>
-#include <stdexcept>
-#include <cmath>
-#include <optional>
-#include <string>
-#include <utility>
-#include <vector>
-
+\#include "solver/orchestrator.h"
+\#include "adapter/pdlp_adapter.h"
+\#include "barrier/barrier_adapter.h"
+\#include "solver/crossover.h"
+\#include "qp/convexity.h"
+\#include "milp/branch_and_bound.h"
+\#include "milp/dual_simplex_solver.h"
+\#include "miqp/branch_and_bound.h"
+\#include "pdlp/pdlp_solver.h"
+\#include "qp/qp_adapter.h"
+\#include "qp/qp_solver.h"
+#include "qp/super_admm_solver.h"
+\#include "presolve/presolver.h"
+\#include "postsolve/postsolver.h"
+\#include \<algorithm>
+\#include \<chrono>
+\#include \<stdexcept>
+\#include \<cmath>
+\#include \<optional>
+\#include \<string>
+\#include \<utility>
+\#include \<vector>
 namespace solver {
 namespace {
-
 using Clock = std::chrono::steady_clock;
-
 double secondsSince(const Clock::time_point& start) {
-    return std::chrono::duration<double>(Clock::now() - start).count();
+    return std::chrono::duration\<double>(Clock::now() - start).count();
 }
-
-// Charges `seconds` to one report stage. A stage can be entered more than once
+// Charges \`seconds\` to one report stage. A stage can be entered more than once
 // (validation runs on the input model and again on the reduced model), so
 // time accumulates; negative is the "never ran" sentinel.
-void addStage(SolveReport* report, double StageTimings::*stage, double seconds) {
+void addStage(SolveReport\* report, double StageTimings::\*stage, double seconds) {
     if (report == nullptr) return;
-    double& slot = report->stageSeconds.*stage;
+    double& slot = report->stageSeconds.\*stage;
     slot = slot < 0.0 ? seconds : slot + seconds;
 }
-
 // Records one validation pass exactly as the pipeline judged it.
 void recordValidation(ValidationSummary& summary, bool passed,
                       postsolve::PostsolveStatus status,
@@ -57,7 +51,6 @@ void recordValidation(ValidationSummary& summary, bool passed,
     summary.maxConstraintResidualScaled = checked.maxConstraintResidualScaled;
     summary.objectiveValue = objective;
 }
-
 // Summarises the PresolveResult the pipeline actually used. Called after the
 // solve's clock has stopped, so the nonzero counting is not charged to it.
 PresolveSummary summarisePresolve(const model::Model& original,
@@ -85,17 +78,15 @@ PresolveSummary summarisePresolve(const model::Model& original,
     }
     return summary;
 }
-
 // Copies the final provenance and total time out of the result, so the
 // report's dispatch section and total agree with SolveResult by construction.
-void finishReport(SolveReport* report, const SolveResult& result) {
+void finishReport(SolveReport\* report, const SolveResult& result) {
     if (report == nullptr) return;
     report->dispatch.engine = result.engine;
     report->dispatch.reason = result.engineReason;
     report->dispatch.executedEngine = result.executedEngine;
     report->stageSeconds.total = result.solveSeconds;
 }
-
 SolveStatus normalise(pdlp::PdlpStatus status) noexcept {
     switch (status) {
         case pdlp::PdlpStatus::Optimal:          return SolveStatus::Optimal;
@@ -108,8 +99,6 @@ SolveStatus normalise(pdlp::PdlpStatus status) noexcept {
     }
     return SolveStatus::NumericalFailure;
 }
-
-
 SolveStatus normalise(miqp::MiqpStatus status) noexcept {
     switch (status) {
         case miqp::MiqpStatus::Optimal:            return SolveStatus::Optimal;
@@ -120,7 +109,6 @@ SolveStatus normalise(miqp::MiqpStatus status) noexcept {
     }
     return SolveStatus::NumericalFailure;
 }
-
 SolveStatus normalise(qp::QpStatus status) noexcept {
     switch (status) {
         case qp::QpStatus::Optimal:          return SolveStatus::Optimal;
@@ -133,7 +121,6 @@ SolveStatus normalise(qp::QpStatus status) noexcept {
     }
     return SolveStatus::NumericalFailure;
 }
-
 SolveStatus normalise(milp::MilpStatus status) noexcept {
     switch (status) {
         case milp::MilpStatus::Optimal:    return SolveStatus::Optimal;
@@ -144,7 +131,6 @@ SolveStatus normalise(milp::MilpStatus status) noexcept {
     }
     return SolveStatus::NumericalFailure;
 }
-
 // SuspectedInfeasibleOrUnbounded maps to LimitReached, deliberately. The
 // barrier method computes no certificate, so mapping it to Infeasible or
 // Unbounded would publish a proof that does not exist -- the same false verdict
@@ -162,7 +148,6 @@ SolveStatus normalise(barrier::Status status) noexcept {
     }
     return SolveStatus::NumericalFailure;
 }
-
 SolveStatus normalise(milp::DualSimplexStatus status) noexcept {
     switch (status) {
         case milp::DualSimplexStatus::Optimal:        return SolveStatus::Optimal;
@@ -173,10 +158,9 @@ SolveStatus normalise(milp::DualSimplexStatus status) noexcept {
     }
     return SolveStatus::NumericalFailure;
 }
-
 // Measures how far a point is from satisfying the model's integrality.
 double integralityViolation(const model::Model& model,
-                            const std::vector<double>& values) {
+                            const std::vector\<double>& values) {
     double worst = 0.0;
     for (std::size_t j = 0; j < model.variables.size() && j < values.size(); ++j) {
         if (model.variables[j].type == model::VariableType::Continuous) {
@@ -186,13 +170,12 @@ double integralityViolation(const model::Model& model,
     }
     return worst;
 }
-
 // Restore original coordinates exactly once, using the actual presolve log.
 SolveResult reconstructResult(const model::Model& original,
                               const presolve::PresolveResult& presolved,
                               SolveResult result, const SolverOptions& options,
-                              std::optional<PostsolveSummary>* summary = nullptr) {
-    const auto clearSolution = [&]() {
+                              std::optional\<PostsolveSummary>\* summary = nullptr) {
+    const auto clearSolution = [&]\() {
         result.hasPrimal = false;
         result.variableValues.clear();
         result.objectiveValue = 0.0;
@@ -214,14 +197,13 @@ SolveResult reconstructResult(const model::Model& original,
         result.dualsUnavailableReason = "No complete primal solution is available.";
         return result;
     }
-
     const bool integerModel = std::any_of(original.variables.begin(), original.variables.end(),
-        [](const model::Variable& v) { return v.type != model::VariableType::Continuous; });
+        []\(const model::Variable& v) { return v.type != model::VariableType::Continuous; });
     const bool wantDuals = result.status == SolveStatus::Optimal && !integerModel && result.hasDuals;
     // Preserve explicit forced-relaxation behavior: validate its continuous point,
     // but report integrality against the ORIGINAL types and never publish MILP duals.
     model::Model relaxation;
-    const model::Model* validationModel = &original;
+    const model::Model\* validationModel = &original;
     if (integerModel && result.executedEngine != Engine::BranchAndCut &&
         result.executedEngine != Engine::Miqp &&
         result.executedEngine != Engine::Trivial) {
@@ -232,8 +214,8 @@ SolveResult reconstructResult(const model::Model& original,
     const double tolerance = std::max(postsolve::DEFAULT_POSTSOLVE_TOLERANCE, options.tolerance);
     postsolve::Postsolver postsolver(tolerance);
     auto post = wantDuals
-        ? postsolver.process(*validationModel, presolved, result.variableValues, result.constraintDuals)
-        : postsolver.process(*validationModel, presolved, result.variableValues);
+        ? postsolver.process(\*validationModel, presolved, result.variableValues, result.constraintDuals)
+        : postsolver.process(\*validationModel, presolved, result.variableValues);
     const bool accepted = post.isSuccess() && std::isfinite(post.originalObjectiveValue);
     const std::string failure = post.isSuccess()
         ? std::string("Non-finite original objective.") : post.errorMessage;
@@ -250,7 +232,6 @@ SolveResult reconstructResult(const model::Model& original,
         result.dualsUnavailableReason = "No valid primal solution is available.";
         return result;
     }
-
     result.hasPrimal = true;
     result.variableValues = std::move(post.primalSolution);
     result.objectiveValue = post.originalObjectiveValue;
@@ -266,13 +247,12 @@ SolveResult reconstructResult(const model::Model& original,
         result.dualsUnavailableReason = "Dual sensitivities require an optimal solution.";
     return result;
 }
-
 // Validate engine output in the supplied coordinates. No identity mapping or
 // transformation replay is needed: row duals already refer to this model.
 SolveResult normalizeReducedResult(const model::Model& model, SolveResult result,
                                    const SolverOptions& options,
-                                   std::optional<ReducedValidationSummary>* summary = nullptr) {
-    const auto clearSolution = [&]() {
+                                   std::optional\<ReducedValidationSummary>\* summary = nullptr) {
+    const auto clearSolution = [&]\() {
         result.hasPrimal = false;
         result.variableValues.clear();
         result.objectiveValue = 0.0;
@@ -295,9 +275,9 @@ SolveResult normalizeReducedResult(const model::Model& model, SolveResult result
         return result;
     }
     const bool integerModel = std::any_of(model.variables.begin(), model.variables.end(),
-        [](const model::Variable& v) { return v.type != model::VariableType::Continuous; });
+        []\(const model::Variable& v) { return v.type != model::VariableType::Continuous; });
     model::Model relaxation;
-    const model::Model* validationModel = &model;
+    const model::Model\* validationModel = &model;
     if (integerModel && result.executedEngine != Engine::BranchAndCut &&
         result.executedEngine != Engine::Miqp &&
         result.executedEngine != Engine::Trivial) {
@@ -308,14 +288,14 @@ SolveResult normalizeReducedResult(const model::Model& model, SolveResult result
     const double tolerance = std::max(postsolve::DEFAULT_POSTSOLVE_TOLERANCE, options.tolerance);
     const postsolve::Postsolver validator(tolerance);
     postsolve::PostsolveResult checked;
-    const bool valid = validator.validateSolution(*validationModel, result.variableValues, checked);
+    const bool valid = validator.validateSolution(\*validationModel, result.variableValues, checked);
     const double objective = valid ? validator.evaluateObjective(model, result.variableValues) : 0.0;
     const bool accepted = valid && std::isfinite(objective);
     const std::string failure = valid ? std::string("Non-finite objective.") : checked.errorMessage;
     if (summary != nullptr) {
         auto& recorded = summary->emplace();
         recorded.engineReportedObjective = result.objectiveValue;
-        // validateSolution leaves `checked.status` untouched on success.
+        // validateSolution leaves \`checked.status\` untouched on success.
         recordValidation(recorded, accepted,
                          valid ? postsolve::PostsolveStatus::Success : checked.status,
                          checked, objective, failure);
@@ -331,7 +311,6 @@ SolveResult normalizeReducedResult(const model::Model& model, SolveResult result
     result.objectiveValue = objective;
     result.maxIntegralityViolation = integralityViolation(model, result.variableValues);
     result.integralityRespected = result.maxIntegralityViolation <= tolerance;
-
     if (integerModel) {
         result.hasDuals = false;
         result.dualsUnavailableReason = "Dual sensitivities are unavailable for integer models.";
@@ -349,13 +328,13 @@ SolveResult normalizeReducedResult(const model::Model& model, SolveResult result
             for (std::size_t i = 0; i < model.constraints.size(); ++i) {
                 if (result.constraintDuals[i] == 0.0) continue;
                 for (const auto& term : model.constraints[i].linearTerms)
-                    checked.reducedCosts[term.variableIndex] -= term.value * result.constraintDuals[i];
+                    checked.reducedCosts[term.variableIndex] -= term.value \* result.constraintDuals[i];
             }
             result.maxDualResidual = validator.dualResidual(model, checked);
             double scale = 1.0;
             for (double dual : result.constraintDuals) scale = std::max(scale, std::abs(dual));
             result.hasDuals = std::isfinite(result.maxDualResidual) &&
-                             result.maxDualResidual <= tolerance * 100.0 * scale;
+                             result.maxDualResidual <= tolerance \* 100.0 \* scale;
             if (result.hasDuals) {
                 result.reducedCosts = std::move(checked.reducedCosts);
                 result.dualsUnavailableReason.clear();
@@ -371,7 +350,6 @@ SolveResult normalizeReducedResult(const model::Model& model, SolveResult result
     }
     return result;
 }
-
 // No constraints remain, so the variables no longer interact: each one moves to
 // whichever of its own bounds improves the objective. Returning just the
 // objective offset here -- as an earlier version did -- silently reported the
@@ -380,25 +358,21 @@ SolveResult normalizeReducedResult(const model::Model& model, SolveResult result
 SolveResult solveTrivially(const model::Model& reduced, SolveResult result) {
     const std::size_t n = reduced.variables.size();
     result.variableValues.assign(n, 0.0);
-
-    std::vector<double> cost(n, 0.0);
+    std::vector\<double> cost(n, 0.0);
     for (const auto& term : reduced.objective.linearTerms) {
-        const auto j = static_cast<std::size_t>(term.variableIndex);
+        const auto j = static_cast\<std::size_t>(term.variableIndex);
         if (j < n) {
             cost[j] += term.value;
         }
     }
-
     const bool maximise =
         reduced.objective.sense == model::ObjectiveSense::Maximize;
     double objective = reduced.objective.offset;
-
     for (std::size_t j = 0; j < n; ++j) {
         const model::Variable& variable = reduced.variables[j];
         // Which bound helps depends on the sign of the cost and the sense.
         const bool wantUpper = maximise ? (cost[j] > 0.0) : (cost[j] < 0.0);
         double value = 0.0;
-
         if (cost[j] == 0.0) {
             // Indifferent: settle on any feasible point inside the bounds.
             value = std::isfinite(variable.lowerBound) ? variable.lowerBound
@@ -420,11 +394,9 @@ SolveResult solveTrivially(const model::Model& reduced, SolveResult result) {
             }
             value = variable.lowerBound;
         }
-
         result.variableValues[j] = value;
-        objective += cost[j] * value;
+        objective += cost[j] \* value;
     }
-
     result.status = SolveStatus::Optimal;
     result.objectiveValue = objective;
     result.executedEngine = Engine::Trivial;
@@ -433,7 +405,6 @@ SolveResult solveTrivially(const model::Model& reduced, SolveResult result) {
     result.hasDuals = true;
     return result;
 }
-
 pdlp::ComputeBackend toPdlp(ComputeBackend value) noexcept {
     switch (value) {
         case ComputeBackend::Cpu:  return pdlp::ComputeBackend::Cpu;
@@ -442,7 +413,6 @@ pdlp::ComputeBackend toPdlp(ComputeBackend value) noexcept {
     }
     return pdlp::ComputeBackend::Auto;
 }
-
 qp::ComputeBackend toQp(ComputeBackend value) noexcept {
     switch (value) {
         case ComputeBackend::Cpu:  return qp::ComputeBackend::Cpu;
@@ -451,14 +421,12 @@ qp::ComputeBackend toQp(ComputeBackend value) noexcept {
     }
     return qp::ComputeBackend::Auto;
 }
-
 ComputeBackend fromEngine(bool cuda) noexcept {
     return cuda ? ComputeBackend::Cuda : ComputeBackend::Cpu;
 }
-
 // An explicit CUDA request the build or machine cannot honour is reported as
 // Unsupported before the engine is invoked -- never quietly run on the CPU.
-template <typename Availability>
+template \<typename Availability>
 bool refuseUnavailableCuda(const SolverOptions& options, const Availability& availability,
                            SolveResult& result) {
     if (options.backend != ComputeBackend::Cuda || availability.usable) {
@@ -469,7 +437,6 @@ bool refuseUnavailableCuda(const SolverOptions& options, const Availability& ava
     result.backendReason = result.message;
     return true;
 }
-
 SolveResult runPdlp(const model::Model& reduced, const SolverOptions& options,
                     SolveResult result) {
     pdlp::CompiledLp compiled;
@@ -484,12 +451,10 @@ SolveResult runPdlp(const model::Model& reduced, const SolverOptions& options,
         result.message = translation.error;
         return result;
     }
-
     if (options.backend == ComputeBackend::Cuda &&
         refuseUnavailableCuda(options, pdlp::cudaAvailability(options.cudaDevice), result)) {
         return result;
     }
-
     pdlp::PdlpOptions engineOptions;
     engineOptions.primalTolerance = options.tolerance;
     engineOptions.dualTolerance = options.tolerance;
@@ -500,24 +465,22 @@ SolveResult runPdlp(const model::Model& reduced, const SolverOptions& options,
     engineOptions.cudaDevice = options.cudaDevice;
     result.executedEngine = Engine::Pdlp;
     const pdlp::PdlpResult raw = pdlp::PdlpSolver{}.solve(compiled, engineOptions);
-    result.executedBackend = fromEngine(raw.executedBackend == pdlp::ComputeBackend::Cuda);
-    result.backendReason = raw.backendMessage;
+    result.executedBackend = fromEngine(raw\.executedBackend == pdlp::ComputeBackend::Cuda);
+    result.backendReason = raw\.backendMessage;
     const adapter::ModelSolution solution =
         adapter::toModelSolution(reduced, translation, raw);
-
-    result.status = normalise(raw.status);
-    result.message = raw.statusMessage;
+    result.status = normalise(raw\.status);
+    result.message = raw\.statusMessage;
     result.variableValues = solution.variableValues;
     result.constraintDuals = solution.constraintDuals;
     // The adapter can zero-fill missing rows. Only accept an actual complete
     // engine vector as evidence that multipliers were supplied.
-    result.hasDuals = raw.rowDual.size() == reduced.constraints.size() &&
+    result.hasDuals = raw\.rowDual.size() == reduced.constraints.size() &&
                       result.constraintDuals.size() == reduced.constraints.size();
     result.objectiveValue = solution.objectiveValue;
-    result.iterations = raw.iterations;
+    result.iterations = raw\.iterations;
     return result;
 }
-
 // The dual simplex, run directly on a bare LP.
 //
 // This is a different entry point from branch-and-cut's per-node use of the
@@ -540,7 +503,6 @@ SolveResult runDualSimplex(const model::Model& reduced, const SolverOptions& opt
     // Forwarded, not dropped. Measured before this line existed: a 2500-row
     // LP under requireVertexSolution ran 17.4s against a 1.0s budget.
     engineOptions.timeLimitSeconds = options.timeLimitSeconds;
-
     // The dual simplex signals two very different things by throwing: input it
     // cannot represent, and a numerical breakdown on input that was perfectly
     // valid. Collapsing both to InvalidModel blames the caller for the
@@ -560,7 +522,6 @@ SolveResult runDualSimplex(const model::Model& reduced, const SolverOptions& opt
         result.message = "the dual simplex solves linear objectives only";
         return result;
     }
-
     milp::DualSimplexResult raw;
     try {
         result.executedEngine = Engine::DualSimplex;
@@ -574,21 +535,18 @@ SolveResult runDualSimplex(const model::Model& reduced, const SolverOptions& opt
         result.message = error.what();
         return result;
     }
-
-    result.status = normalise(raw.status);
+    result.status = normalise(raw\.status);
     result.message = "dual simplex";
-    result.variableValues = raw.primal;
-    result.objectiveValue = raw.objectiveValue;
-    result.iterations = raw.iterations;
-
+    result.variableValues = raw\.primal;
+    result.objectiveValue = raw\.objectiveValue;
+    result.iterations = raw\.iterations;
     // Empty for Infeasible/Unbounded, where there is no basis to price from.
-    if (raw.dual.size() == reduced.constraints.size()) {
-        result.constraintDuals = raw.dual;
+    if (raw\.dual.size() == reduced.constraints.size()) {
+        result.constraintDuals = raw\.dual;
         result.hasDuals = true;
     }
     return result;
 }
-
 // The barrier method on an LP or convex QP.
 //
 // Convexity is re-checked here even though the dispatcher checks it for the
@@ -607,7 +565,6 @@ SolveResult runBarrier(const model::Model& reduced, const SolverOptions& options
             return result;
         }
     }
-
     barrier::BarrierProblem problem;
     const barrier::Translation translation = barrier::toBarrierProblem(reduced, problem);
     if (!translation.ok) {
@@ -615,7 +572,6 @@ SolveResult runBarrier(const model::Model& reduced, const SolverOptions& options
         result.message = translation.error;
         return result;
     }
-
     barrier::Options engineOptions;
     engineOptions.primalTolerance = options.tolerance;
     engineOptions.dualTolerance = options.tolerance;
@@ -627,24 +583,22 @@ SolveResult runBarrier(const model::Model& reduced, const SolverOptions& options
     const auto engineStart = Clock::now();
     const barrier::Result raw = barrier::BarrierSolver{}.solve(problem, engineOptions);
     const barrier::ModelSolution solution = barrier::toModelSolution(reduced, translation, raw);
-
-    result.status = normalise(raw.status);
-    result.message = std::string("barrier: ") + raw.message;
-    result.iterations = raw.iterations;
+    result.status = normalise(raw\.status);
+    result.message = std::string("barrier: ") + raw\.message;
+    result.iterations = raw\.iterations;
     // The iterate is handed on whatever the status; postsolve's primal
     // validation, not this function, decides whether it counts as a solution.
-    if (raw.hasSolution) {
+    if (raw\.hasSolution) {
         result.variableValues = solution.variableValues;
         result.objectiveValue = solution.objectiveValue;
     }
     // Multipliers are published only at optimality: an interior iterate's y
     // is not a shadow price until the gap has closed.
-    if (raw.status == barrier::Status::Optimal &&
+    if (raw\.status == barrier::Status::Optimal &&
         solution.constraintDuals.size() == reduced.constraints.size()) {
         result.constraintDuals = solution.constraintDuals;
         result.hasDuals = true;
     }
-
     // Crossover to a vertex. See solver/crossover.h for why the interior point
     // alone does not survive this pipeline's vertex-shaped postsolve. The
     // interior solution above stays in place unless the vertex verifies.
@@ -655,7 +609,7 @@ SolveResult runBarrier(const model::Model& reduced, const SolverOptions& options
     // 60. An exhausted budget skips crossover outright rather than passing a
     // remainder of zero on: in SolverOptions, timeLimitSeconds == 0 means NO
     // limit, so a zero remainder would have turned into an unlimited one.
-    if (options.barrierCrossover && raw.status == barrier::Status::Optimal &&
+    if (options.barrierCrossover && raw\.status == barrier::Status::Optimal &&
         reduced.objective.quadraticTerms.empty()) {
         SolverOptions crossoverOptions = options;
         bool budgetLeft = true;
@@ -680,7 +634,6 @@ SolveResult runBarrier(const model::Model& reduced, const SolverOptions& options
     }
     return result;
 }
-
 SolveResult runQp(const model::Model& reduced, const SolverOptions& options,
                   SolveResult result) {
     qp::QpModel problem;
@@ -692,12 +645,10 @@ SolveResult runQp(const model::Model& reduced, const SolverOptions& options,
         result.message = error.what();
         return result;
     }
-
     if (options.backend == ComputeBackend::Cuda &&
         refuseUnavailableCuda(options, qp::cudaAvailability(options.cudaDevice), result)) {
         return result;
     }
-
     qp::AdmmOptions engineOptions;
     engineOptions.primalTolerance = options.tolerance;
     engineOptions.dualTolerance = options.tolerance;
@@ -707,12 +658,11 @@ SolveResult runQp(const model::Model& reduced, const SolverOptions& options,
     engineOptions.cudaDevice = options.cudaDevice;
     result.executedEngine = Engine::Qp;
     const qp::AdmmResult raw = qp::QpSolver{}.solve(problem, engineOptions);
-    result.executedBackend = fromEngine(raw.executedBackend == qp::ComputeBackend::Cuda);
-    result.backendReason = raw.backendMessage;
-
-    result.status = normalise(raw.status);
-    result.message = raw.statusMessage;
-    result.variableValues = raw.primal;
+    result.executedBackend = fromEngine(raw\.executedBackend == qp::ComputeBackend::Cuda);
+    result.backendReason = raw\.backendMessage;
+    result.status = normalise(raw\.status);
+    result.message = raw\.statusMessage;
+    result.variableValues = raw\.primal;
     // fromModel negated P and q for Maximize so the ADMM engine (which only
     // ever minimises) solves an equivalent problem; undo that negation before
     // adding the offset, which is sign-independent of Maximize/Minimize. Doing
@@ -720,19 +670,18 @@ SolveResult runQp(const model::Model& reduced, const SolverOptions& options,
     // offset's sign too, which is wrong: "maximize x + 100" and
     // "minimize -x - 100" are the same problem, not "minimize -x + 100".
     result.objectiveValue =
-        (translation.objectiveNegated ? -raw.primalObjective : raw.primalObjective) +
+        (translation.objectiveNegated ? -raw\.primalObjective : raw\.primalObjective) +
         translation.objectiveOffset;
-    result.iterations = raw.iterations;
-
+    result.iterations = raw\.iterations;
     // The QP adapter appends one identity row per bounded variable, so the dual
     // vector is longer than the model's constraint list. Report only the
     // multipliers that correspond to real constraints; the trailing entries are
     // bound multipliers; reduced costs are recomputed using the Model gradient.
     const std::size_t rows = reduced.constraints.size();
-    if (raw.constraintDual.size() >= rows) {
-        result.constraintDuals.assign(raw.constraintDual.begin(),
-                                      raw.constraintDual.begin() +
-                                          static_cast<std::ptrdiff_t>(rows));
+    if (raw\.constraintDual.size() >= rows) {
+        result.constraintDuals.assign(raw\.constraintDual.begin(),
+                                      raw\.constraintDual.begin() +
+                                          static_cast\<std::ptrdiff_t>(rows));
         // ADMM uses grad + A^T y = 0, so its multiplier is the NEGATIVE of a
         // shadow price, and a maximisation negates it again -- the two compose
         // rather than cancel. The rule itself is unchanged; it now lives in
@@ -740,7 +689,7 @@ SolveResult runQp(const model::Model& reduced, const SolverOptions& options,
         // pdlp_adapter pairs its two directions, so there is one place to read
         // it and one place to get it wrong.
         //
-        // hasDuals is `rows > 0` rather than an unconditional true: with no
+        // hasDuals is \`rows > 0\` rather than an unconditional true: with no
         // constraints there are no row duals to report, and claiming otherwise
         // hands a caller an empty vector flagged as present.
         qp::toModelDuals(translation, result.constraintDuals);
@@ -748,7 +697,46 @@ SolveResult runQp(const model::Model& reduced, const SolverOptions& options,
     }
     return result;
 }
-
+SolveResult runSuperAdmm(const model::Model& reduced, const SolverOptions& options,
+                         SolveResult result) {
+    qp::QpModel problem;
+    qp::QpTranslation translation;
+    try {
+        problem = qp::fromModel(reduced, translation);
+    } catch (const std::exception& error) {
+        result.status = SolveStatus::InvalidModel;
+        result.message = error.what();
+        return result;
+    }
+    qp::SuperAdmmOptions engineOptions;
+    engineOptions.primalTolerance = options.tolerance;
+    engineOptions.dualTolerance = options.tolerance;
+    engineOptions.timeLimitSeconds = options.timeLimitSeconds;
+    result.executedEngine = Engine::SuperAdmm;
+    try {
+        qp::SuperAdmmSolver solver(problem, engineOptions);
+        const qp::AdmmResult raw = solver.solve();
+        result.status = normalise(raw.status);
+        result.message = raw.statusMessage;
+        result.variableValues = raw.primal;
+        result.objectiveValue =
+            (translation.objectiveNegated ? -raw.primalObjective : raw.primalObjective) +
+            translation.objectiveOffset;
+        result.iterations = raw.iterations;
+        const std::size_t rows = reduced.constraints.size();
+        if (raw.constraintDual.size() >= rows) {
+            result.constraintDuals.assign(
+                raw.constraintDual.begin(),
+                raw.constraintDual.begin() + static_cast<std::ptrdiff_t>(rows));
+            qp::toModelDuals(translation, result.constraintDuals);
+            result.hasDuals = rows > 0;
+        }
+    } catch (const std::exception& error) {
+        result.status = SolveStatus::NumericalFailure;
+        result.message = error.what();
+    }
+    return result;
+}
 SolveResult runMiqp(const model::Model& reduced, const SolverOptions& options,
                     SolveResult result) {
     miqp::MiqpOptions engineOptions;
@@ -758,21 +746,18 @@ SolveResult runMiqp(const model::Model& reduced, const SolverOptions& options,
     engineOptions.feasibilityTolerance = std::max(1e-7, options.tolerance);
     engineOptions.objectiveTolerance = std::max(1e-9, options.tolerance);
     engineOptions.threadCount = options.threadCount;
-
     result.executedEngine = Engine::Miqp;
     const miqp::MiqpResult raw =
         miqp::BranchAndBoundSolver{}.solve(reduced, engineOptions);
-
-    result.status = normalise(raw.status);
-    result.message = raw.message;
-    result.variableValues = raw.primal;
-    result.objectiveValue = raw.objectiveValue;
-    result.nodeCount = raw.nodeCount;
-    result.iterations = raw.qpIterations;
+    result.status = normalise(raw\.status);
+    result.message = raw\.message;
+    result.variableValues = raw\.primal;
+    result.objectiveValue = raw\.objectiveValue;
+    result.nodeCount = raw\.nodeCount;
+    result.iterations = raw\.qpIterations;
     result.hasDuals = false;
     return result;
 }
-
 SolveResult runBranchAndCut(const model::Model& reduced, const SolverOptions& options,
                             SolveResult result) {
     milp::MilpOptions engineOptions;
@@ -782,23 +767,19 @@ SolveResult runBranchAndCut(const model::Model& reduced, const SolverOptions& op
     result.executedEngine = Engine::BranchAndCut;
     const milp::MilpResult raw =
         milp::BranchAndBoundSolver{}.solve(reduced, engineOptions);
-
-    result.status = normalise(raw.status);
+    result.status = normalise(raw\.status);
     result.message = "branch-and-cut";
-    result.variableValues = raw.primal;
-    result.objectiveValue = raw.objectiveValue;
-    result.nodeCount = raw.nodeCount;
-
+    result.variableValues = raw\.primal;
+    result.objectiveValue = raw\.objectiveValue;
+    result.nodeCount = raw\.nodeCount;
     // Branch-and-cut has no meaningful dual for the integer problem. Say so by
     // leaving the vector empty rather than filling it with zeros, which a
     // caller could mistake for "every constraint is slack".
     result.hasDuals = false;
     return result;
 }
-
 }  // namespace
-
-const char* toString(SolveStatus value) noexcept {
+const char\* toString(SolveStatus value) noexcept {
     switch (value) {
         case SolveStatus::Optimal:          return "optimal";
         case SolveStatus::Infeasible:       return "infeasible";
@@ -810,19 +791,16 @@ const char* toString(SolveStatus value) noexcept {
     }
     return "unknown";
 }
-
 namespace {
-
 // Dispatch, the engine and reduced-space validation: the part of the pipeline
 // solve() and solveReduced() share. Writes only its own report sections and
 // stages; the callers own the rest of the report.
 SolveResult runReducedPipeline(const model::Model& presolvedModel,
                                const Classification& classification,
                                const SolverOptions& options,
-                               SolveReport* report) {
+                               SolveReport\* report) {
     const Clock::time_point start = Clock::now();
     SolveResult result;
-
     const bool valid = presolvedModel.validate();
     addStage(report, &StageTimings::validation, secondsSince(start));
     if (!valid) {
@@ -831,10 +809,8 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
         result.solveSeconds = secondsSince(start);
         return result;
     }
-
     presolve::PresolveResult presolved;
     presolved.model = presolvedModel;
-
     Clock::time_point stageStart = Clock::now();
     const DispatchDecision decision =
         dispatch(presolvedModel, classification, presolved, options);
@@ -842,7 +818,6 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
     if (report != nullptr) report->dispatch.dispatcherInvoked = true;
     result.engine = decision.engine;
     result.engineReason = decision.reason;
-
     stageStart = Clock::now();
     bool enginePathEntered = true;
     switch (decision.engine) {
@@ -851,38 +826,33 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
             result.status = SolveStatus::Infeasible;
             result.message = decision.reason;
             break;
-
         case Engine::Trivial:
             result = solveTrivially(presolvedModel, std::move(result));
             break;
-
         case Engine::Nlp: // Defensive: affine dispatcher rejects this engine.
         case Engine::Unsupported:
             enginePathEntered = false;
             result.status = SolveStatus::Unsupported;
             result.message = decision.reason;
             break;
-
         case Engine::BranchAndCut:
             result = runBranchAndCut(presolvedModel, options, std::move(result));
             break;
-
         case Engine::Qp:
             result = runQp(presolvedModel, options, std::move(result));
             break;
-
+                case Engine::SuperAdmm:
+            result = runSuperAdmm(presolvedModel, options, std::move(result));
+            break;
         case Engine::Miqp:
             result = runMiqp(presolvedModel, options, std::move(result));
             break;
-
         case Engine::DualSimplex:
             result = runDualSimplex(presolvedModel, options, std::move(result));
             break;
-
         case Engine::Barrier:
             result = runBarrier(presolvedModel, options, std::move(result));
             break;
-
         case Engine::Pdlp:
             result = runPdlp(presolvedModel, options, std::move(result));
             break;
@@ -890,7 +860,6 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
     if (enginePathEntered) {
         addStage(report, &StageTimings::engine, secondsSince(stageStart));
     }
-
     // Engines without a CUDA backend run on the CPU whatever was requested; say
     // so rather than leave a CUDA request looking honoured.
     if (options.backend == ComputeBackend::Cuda && result.backendReason.empty() &&
@@ -900,7 +869,6 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
         result.backendReason = std::string(toString(result.executedEngine)) +
             " has no CUDA backend; ran on the CPU";
     }
-
     result.reducedVariableCount = presolvedModel.variables.size();
     result.reducedConstraintCount = presolvedModel.constraints.size();
     stageStart = Clock::now();
@@ -912,28 +880,24 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
     result.solveSeconds = secondsSince(start);
     return result;
 }
-
 }  // namespace
-
 SolveResult solveReduced(const model::Model& presolvedModel,
                          const Classification& classification,
                          const SolverOptions& options,
-                         SolveReport* report) {
+                         SolveReport\* report) {
     if (report != nullptr) {
-        *report = SolveReport{};
+        \*report = SolveReport{};
         report->classification = classification;
     }
     SolveResult result = runReducedPipeline(presolvedModel, classification, options, report);
     finishReport(report, result);
     return result;
 }
-
 SolveResult solve(const model::Model& model, const SolverOptions& options,
-                  SolveReport* report) {
-    if (report != nullptr) *report = SolveReport{};
+                  SolveReport\* report) {
+    if (report != nullptr) \*report = SolveReport{};
     const Clock::time_point start = Clock::now();
     SolveResult result;
-
     const bool valid = model.validate();
     addStage(report, &StageTimings::validation, secondsSince(start));
     if (!valid) {
@@ -943,7 +907,6 @@ SolveResult solve(const model::Model& model, const SolverOptions& options,
         finishReport(report, result);
         return result;
     }
-
     if (options.forceEngine == Engine::Nlp) {
         result.status = SolveStatus::Unsupported;
         result.message = "NLP requires nlp::Problem and an explicit initial point (CLI: solve model.nlp)";
@@ -952,19 +915,16 @@ SolveResult solve(const model::Model& model, const SolverOptions& options,
         finishReport(report, result);
         return result;
     }
-
     // 1. Classify the ORIGINAL model. Presolve's reductions depend on the class.
     Clock::time_point stageStart = Clock::now();
     const Classification classification = classify(model);
     addStage(report, &StageTimings::classification, secondsSince(stageStart));
     if (report != nullptr) report->classification = classification;
-
     // 2. Presolve ONCE.
     stageStart = Clock::now();
     presolve::Presolver presolver;
     const presolve::PresolveResult presolved = presolver.run(model);
     addStage(report, &StageTimings::presolve, secondsSince(stageStart));
-
     if (presolved.infeasible) {
         result.status = SolveStatus::Infeasible;
         result.engine = Engine::Infeasible;
@@ -978,7 +938,6 @@ SolveResult solve(const model::Model& model, const SolverOptions& options,
         finishReport(report, result);
         return result;
     }
-
     // 3. Dispatch and validate in reduced coordinates, without postsolve.
     result = runReducedPipeline(presolved.model, classification, options, report);
     // Do not skip empty vectors: presolve may have eliminated every variable.
@@ -994,5 +953,4 @@ SolveResult solve(const model::Model& model, const SolverOptions& options,
     finishReport(report, result);
     return result;
 }
-
 }  // namespace solver

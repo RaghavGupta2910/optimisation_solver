@@ -623,6 +623,89 @@ void testMaximizeQpWithObjectiveOffset() {
 // If P_ii were set to q_ii instead of 2*q_ii the engine would minimise
 // 1.5x^2 - 12x, giving x = 4 and -24 -- so this discriminates the convention
 // rather than merely checking that something was solved.
+
+void testForcedSuperAdmmRunsThroughPipeline() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, 10.0);
+    b.row("lower", 1.0, INF, {{0, 1.0}});
+    b.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
+    b.m.objective.quadraticTerms = {{0, 0, 1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.tolerance = 1e-6;
+
+    const auto r = solver::solve(b.m, options);
+    report("forced SuperADMM", r);
+
+    ck(r.engine == solver::Engine::SuperAdmm,
+       "dispatcher selects SuperADMM when explicitly forced");
+    ck(r.executedEngine == solver::Engine::SuperAdmm,
+       "orchestrator records SuperADMM as the executed engine");
+    ck(r.status == solver::SolveStatus::Optimal,
+       std::string("SuperADMM pipeline solve is optimal: ") + r.message);
+    ck(r.hasPrimal, "SuperADMM pipeline publishes a primal solution");
+    ck(r.variableValues.size() == b.m.variables.size(),
+       "SuperADMM primal is normalized to original variable coordinates");
+    near(r.variableValues[0], 1.0, 1e-4,
+         "SuperADMM pipeline solution");
+    near(r.objectiveValue, 1.0, 1e-4,
+         "SuperADMM pipeline objective");
+}
+
+
+void testSuperAdmmTimeLimitPropagation() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, 10.0);
+    b.row("lower", 1.0, INF, {{0, 1.0}});
+    b.obj(model::ObjectiveSense::Minimize, {{0, 0.0}});
+    b.m.objective.quadraticTerms = {{0, 0, 1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.timeLimitSeconds = 1e-30;
+
+    const auto r = solver::solve(b.m, options);
+    report("SuperADMM time limit", r);
+
+    ck(r.engine == solver::Engine::SuperAdmm,
+       "time-limited solve remains attributed to SuperADMM");
+    ck(r.executedEngine == solver::Engine::SuperAdmm,
+       "time-limited SuperADMM execution is recorded");
+    ck(r.status == solver::SolveStatus::LimitReached,
+       "SuperADMM time limit is normalized to LimitReached");
+}
+
+
+void testForcedSuperAdmmMaximizeWithOffset() {
+    Builder b;
+    b.var("x", model::VariableType::Continuous, 0.0, INF);
+    b.var("y", model::VariableType::Continuous, 0.0, INF);
+    b.row("c0", -INF, 2.0, {{0, 1.0}, {1, 1.0}});
+    b.obj(model::ObjectiveSense::Maximize, {{0, 2.0}, {1, 4.0}}, -30.0);
+    b.m.objective.quadraticTerms = {{0, 0, -1.0}, {1, 1, -1.0}};
+
+    solver::SolverOptions options;
+    options.forceEngine = solver::Engine::SuperAdmm;
+    options.tolerance = 1e-6;
+
+    const auto r = solver::solve(b.m, options);
+    report("forced SuperADMM max QP with offset", r);
+
+    ck(r.engine == solver::Engine::SuperAdmm,
+       "maximize QP is explicitly dispatched to SuperADMM");
+    ck(r.executedEngine == solver::Engine::SuperAdmm,
+       "maximize QP actually executes SuperADMM");
+    ck(r.status == solver::SolveStatus::Optimal,
+       std::string("SuperADMM maximize QP is optimal: ") + r.message);
+    near(r.variableValues[0], 0.5, 1e-4,
+         "SuperADMM maximize QP x");
+    near(r.variableValues[1], 1.5, 1e-4,
+         "SuperADMM maximize QP y");
+    near(r.objectiveValue, -25.5, 1e-4,
+         "SuperADMM maximize QP objective offset");
+}
+
 void testQpDiagonalQuadraticCoefficient() {
     Builder b;
     b.var("x", model::VariableType::Continuous, -100.0, 100.0);
@@ -755,6 +838,9 @@ int main() {
     testPresolveToMiqp();
     testNonConvexMiqpRejectedEndToEnd();
     testQpDualsMatchConstraintCount();
+    testForcedSuperAdmmRunsThroughPipeline();
+    testSuperAdmmTimeLimitPropagation();
+    testForcedSuperAdmmMaximizeWithOffset();
     testUniformResultContract();
 
     std::printf("\n%d checks, %d failures\n", checks, failures);

@@ -41,6 +41,7 @@ const char* toString(Engine value) noexcept {
         case Engine::Nlp:          return "nlp_sqp";
         case Engine::Qp:           return "qp";
         case Engine::Miqp:         return "miqp";
+        case Engine::SuperAdmm:    return "super_admm";
         case Engine::Infeasible:   return "infeasible";
         case Engine::Trivial:      return "trivial";
         case Engine::Unsupported:  return "unsupported";
@@ -61,26 +62,35 @@ std::optional<Engine> parseEngine(std::string_view name) noexcept {
     if (name == "branch_and_cut") {
         return Engine::BranchAndCut;
     }
-    if (name == "nlp" || name == "nlp_sqp") return Engine::Nlp;
+    if (name == "nlp" || name == "nlp_sqp") {
+        return Engine::Nlp;
+    }
     if (name == "qp") {
         return Engine::Qp;
     }
     if (name == "miqp") {
         return Engine::Miqp;
     }
+    if (name == "super_admm") {
+        return Engine::SuperAdmm;
+    }
     return std::nullopt;
 }
 
 const char* toString(ComputeBackend value) noexcept {
     switch (value) {
-        case ComputeBackend::Auto: return "auto";
-        case ComputeBackend::Cpu:  return "cpu";
-        case ComputeBackend::Cuda: return "cuda";
+        case ComputeBackend::Auto:
+            return "auto";
+        case ComputeBackend::Cpu:
+            return "cpu";
+        case ComputeBackend::Cuda:
+            return "cuda";
     }
     return "unknown";
 }
 
-std::optional<ComputeBackend> parseComputeBackend(std::string_view name) noexcept {
+std::optional<ComputeBackend> parseComputeBackend(
+    std::string_view name) noexcept {
     if (name == "auto") {
         return ComputeBackend::Auto;
     }
@@ -100,9 +110,13 @@ DispatchDecision dispatch(
     const SolverOptions& options
 ) {
     DispatchDecision decision;
-    if (classification.problemClass == ProblemClass::NLP || options.forceEngine == Engine::Nlp) {
+
+    if (classification.problemClass == ProblemClass::NLP ||
+        options.forceEngine == Engine::Nlp) {
         decision.engine = Engine::Unsupported;
-        decision.reason = "NLP requires nlp::Problem and an explicit initial point; affine presolve is not applicable";
+        decision.reason =
+            "NLP requires nlp::Problem and an explicit initial point; "
+            "affine presolve is not applicable";
         return decision;
     }
 
@@ -113,9 +127,10 @@ DispatchDecision dispatch(
         return decision;
     }
 
-    // An explicit request is honoured ahead of every structural rule, including
-    // the integrality rule -- forcing an LP engine onto a model with integer
-    // variables solves the relaxation, which is a legitimate thing to ask for.
+    // An explicit request is honoured ahead of every structural rule,
+    // including the integrality rule -- forcing an LP engine onto a model
+    // with integer variables solves the relaxation, which is a legitimate
+    // thing to ask for.
     if (options.forceEngine.has_value()) {
         decision.engine = *options.forceEngine;
         decision.reason = "engine forced by the caller";
@@ -128,9 +143,9 @@ DispatchDecision dispatch(
         return decision;
     }
 
-    // Dispatch the REDUCED model by the curvature it actually retains. Presolve
-    // may eliminate every quadratic term, so the original classification is
-    // not enough to decide which engine should run.
+    // Dispatch the REDUCED model by the curvature it actually retains.
+    // Presolve may eliminate every quadratic term, so the original
+    // classification is not enough to decide which engine should run.
     const bool quadratic = !reduced.objective.quadraticTerms.empty();
 
     if (quadratic) {
@@ -142,22 +157,29 @@ DispatchDecision dispatch(
         }
 
         // The ADMM engine is a convex-QP engine. For minimization the Hessian
-        // must be PSD; for maximization the Hessian must be NSD (equivalently
-        // the sign-negated minimization Hessian must be PSD). Never let a
-        // non-convex model silently enter a convex relaxation engine.
+        // must be PSD; for maximization the Hessian must be NSD
+        // (equivalently the sign-negated minimization Hessian must be PSD).
+        // Never let a non-convex model silently enter a convex relaxation
+        // engine.
         const qp::ConvexityCheck convexity = qp::checkConvexity(reduced);
         if (!convexity.convexForObjectiveSense) {
             decision.engine = Engine::Unsupported;
-            decision.reason = "non-convex quadratic objective is unsupported: " +
-                              convexity.reason;
+            decision.reason =
+                "non-convex quadratic objective is unsupported: " +
+                convexity.reason;
             return decision;
         }
 
         if (hasIntegrality(reduced)) {
             decision.engine = Engine::Miqp;
-            decision.reason = "convex MIQP; using branch-and-bound over validated convex QP relaxations";
+            decision.reason =
+                "convex MIQP; using branch-and-bound over validated convex "
+                "QP relaxations";
             return decision;
         }
+
+        // Automatic QP dispatch remains on the production QP engine.
+        // SuperADMM is explicitly opt-in through SolverOptions::forceEngine.
         decision.engine = Engine::Qp;
         decision.reason = convexity.reason;
         return decision;
@@ -175,29 +197,36 @@ DispatchDecision dispatch(
     if (options.requireVertexSolution) {
         // The dual simplex is the only vertex-capable engine here, and it
         // maintains a DENSE m x m basis inverse -- 8*m^2 bytes, allocated up
-        // front, before a single pivot. That is 32 MB at the 2000-row
+        // front, before a single pivot. 8*m^2 bytes is 32 MB at the 2000-row
         // threshold but 20 GB at 50000 rows, so honouring this option at any
         // size would mean attempting an allocation that cannot succeed.
         //
         // Checking the same size limits used for automatic routing keeps the
         // option honest: it is satisfied where it can be, and refused with a
         // reason where no engine can satisfy it, rather than silently handing
-        // back PDLP's non-vertex iterate (which is what this did before) or
-        // grinding against a budget it cannot honour.
+        // back PDLP's non-vertex iterate or grinding against a budget it
+        // cannot honour.
         const std::size_t vertexRows = reduced.constraints.size();
         const std::int64_t vertexNonzeros = countNonzeros(reduced);
+
         if (vertexRows >= options.dualSimplexMaxRows ||
             vertexNonzeros > options.dualSimplexMaxNonzeros) {
             decision.engine = Engine::Unsupported;
             decision.reason =
-                "a vertex solution was requested, but the only vertex-capable "
-                "engine (dual simplex, dense basis inverse) is limited to " +
-                std::to_string(options.dualSimplexMaxRows) + " rows and " +
+                "a vertex solution was requested, but the only "
+                "vertex-capable engine (dual simplex, dense basis inverse) "
+                "is limited to " +
+                std::to_string(options.dualSimplexMaxRows) +
+                " rows and " +
                 std::to_string(options.dualSimplexMaxNonzeros) +
-                " nonzeros; this model has " + std::to_string(vertexRows) +
-                " rows and " + std::to_string(vertexNonzeros) + " nonzeros";
+                " nonzeros; this model has " +
+                std::to_string(vertexRows) +
+                " rows and " +
+                std::to_string(vertexNonzeros) +
+                " nonzeros";
             return decision;
         }
+
         decision.engine = Engine::DualSimplex;
         decision.reason =
             "a basis or vertex solution was requested; the dual simplex "
@@ -218,15 +247,21 @@ DispatchDecision dispatch(
     if (rows < options.dualSimplexMaxRows &&
         nonzeros <= options.dualSimplexMaxNonzeros) {
         decision.engine = Engine::DualSimplex;
-        decision.reason = "small enough for the dual simplex (" +
-            std::to_string(rows) + " rows, " + std::to_string(nonzeros) +
+        decision.reason =
+            "small enough for the dual simplex (" +
+            std::to_string(rows) +
+            " rows, " +
+            std::to_string(nonzeros) +
             " nonzeros); it terminates at an exact vertex";
         return decision;
     }
 
     decision.engine = Engine::Pdlp;
-    decision.reason = "too large for a dense basis inverse (" +
-        std::to_string(rows) + " rows, " + std::to_string(nonzeros) +
+    decision.reason =
+        "too large for a dense basis inverse (" +
+        std::to_string(rows) +
+        " rows, " +
+        std::to_string(nonzeros) +
         " nonzeros); a first-order method avoids factorization entirely";
     return decision;
 }

@@ -36,6 +36,10 @@ enum class Engine {
     // Elastic SQP for nlp::Problem, with first-order local termination.
     Nlp,
 
+    // SuperADMM direct KKT backend for convex quadratic objectives.
+    // Explicitly selectable; automatic QP dispatch remains on Engine::Qp.
+    SuperAdmm,
+
     // Presolve proved infeasibility; no engine runs.
     Infeasible,
 
@@ -64,7 +68,8 @@ enum class ComputeBackend {
 };
 
 [[nodiscard]] const char* toString(ComputeBackend value) noexcept;
-[[nodiscard]] std::optional<ComputeBackend> parseComputeBackend(std::string_view name) noexcept;
+[[nodiscard]] std::optional<ComputeBackend> parseComputeBackend(
+    std::string_view name) noexcept;
 
 // Caller-facing knobs the dispatcher must respect.
 struct SolverOptions {

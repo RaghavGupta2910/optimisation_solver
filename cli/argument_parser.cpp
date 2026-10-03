@@ -1,4 +1,5 @@
 #include "argument_parser.h"
+
 #include "solver/dispatcher.h"
 
 #include <cctype>
@@ -17,11 +18,11 @@ bool ArgumentParser::isValidSolverName(const std::string& name) {
 std::string ArgumentParser::getRootHelp() {
     return "Usage: optimsolver [command] [options]\n\n"
            "Commands:\n"
-           "  (none)              Launch interactive terminal interface\n"
-           "  solve <model.mps>   Solve an MPS or .nlp problem\n\n"
+           "  (none)               Launch interactive terminal interface\n"
+           "  solve <model.mps>    Solve an MPS or .nlp problem\n\n"
            "  solve-nlp <model.nlp> Solve a smooth nonlinear problem (solve-nlp --help)\n\n"
            "Options:\n"
-           "  -h, --help          Show this help message\n\n"
+           "  -h, --help           Show this help message\n\n"
            "Run 'optimsolver solve --help' for options specific to the solve command.";
 }
 
@@ -31,7 +32,7 @@ std::string ArgumentParser::getSolveHelp() {
            "  <model.mps>             Path to input problem file in MPS format (required)\n\n"
            "Options:\n"
            "  --solver <name>         Force a specific solver engine:\n"
-           "                          pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp\n"
+           "                          pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp, super_admm\n"
            "  --time-limit <seconds>  Maximum solve time budget in seconds (positive number)\n"
            "  --output <file>         Write reconstructed original-space solution to file\n"
            "  --json <file>           Write a structured JSON record of the solve\n"
@@ -41,16 +42,26 @@ std::string ArgumentParser::getSolveHelp() {
            "  --cuda-device <index>   CUDA device to use with --backend cuda/auto (default 0)\n"
            "  --verbose               Print the full execution report (presolve, dispatch,\n"
            "                          stage timings, validation residuals)\n"
-           "  .nlp input             Routes to NLP; see solve-nlp --help for its options\n"
-           "                         NLP success means first-order stationarity.\n"
+           "  .nlp input              Routes to NLP; see solve-nlp --help for its options\n"
+           "                          NLP success means first-order stationarity.\n"
            "  -h, --help              Show this help message";
 }
 
 bool ArgumentParser::isNlpPath(const std::string& path) {
     const auto dot = path.find_last_of('.');
-    if (dot == std::string::npos) return false;
+
+    if (dot == std::string::npos) {
+        return false;
+    }
+
     std::string extension = path.substr(dot);
-    for (char& c : extension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    for (char& c : extension) {
+        c = static_cast<char>(
+            std::tolower(
+                static_cast<unsigned char>(c)));
+    }
+
     return extension == ".nlp";
 }
 
@@ -68,7 +79,10 @@ std::string ArgumentParser::getNlpHelp() {
            "--threads, --dump-model and --verbose are not supported for NLP.\n";
 }
 
-ParseResult ArgumentParser::parse(int argc, const char* const argv[]) {
+ParseResult ArgumentParser::parse(
+    int argc,
+    const char* const argv[]) {
+
     ParseResult res;
 
     if (argc <= 1) {
@@ -94,225 +108,548 @@ ParseResult ArgumentParser::parse(int argc, const char* const argv[]) {
 
     if (firstArg != "solve" && firstArg != "solve-nlp") {
         res.success = false;
-        res.errorTitle = "Unknown command '" + firstArg + "'";
-        res.errorDetails = "Run 'optimsolver --help' to see available commands.";
-        res.errorMessage = "Error: Unknown command '" + firstArg + "'.\n" + getRootHelp();
+        res.errorTitle =
+            "Unknown command '" + firstArg + "'";
+
+        res.errorDetails =
+            "Run 'optimsolver --help' to see available commands.";
+
+        res.errorMessage =
+            "Error: Unknown command '" +
+            firstArg +
+            "'.\n" +
+            getRootHelp();
+
         return res;
     }
 
-    res.command = firstArg == "solve-nlp" ? Command::SolveNlp : Command::Solve;
+    res.command =
+        firstArg == "solve-nlp"
+            ? Command::SolveNlp
+            : Command::Solve;
 
     int i = 2;
+
     while (i < argc) {
         std::string arg = argv[i];
 
         if (arg == "--help" || arg == "-h") {
-            if (res.command == Command::Solve && isNlpPath(res.solveOptions.modelPath))
+            if (res.command == Command::Solve &&
+                isNlpPath(res.solveOptions.modelPath)) {
+
                 res.command = Command::SolveNlp;
+            }
+
             res.isHelp = true;
             res.solveOptions.help = true;
             res.success = true;
             return res;
+
         } else if (arg == "--verbose") {
             res.solveOptions.verbose = true;
-        } else if (arg == "--tolerance" || arg == "--iterations") {
+
+        } else if (arg == "--tolerance" ||
+                   arg == "--iterations") {
+
             if (i + 1 >= argc) {
-                res.errorTitle = "Missing value for option '" + arg + "'";
-                res.errorMessage = res.errorTitle;
+                res.errorTitle =
+                    "Missing value for option '" + arg + "'";
+
+                res.errorMessage =
+                    res.errorTitle;
+
                 return res;
             }
+
             const std::string value = argv[++i];
+
             char* end = nullptr;
+
             errno = 0;
+
             if (arg == "--tolerance") {
-                double parsed = std::strtod(value.c_str(), &end);
-                if (end == value.c_str() || *end || errno == ERANGE || !std::isfinite(parsed) || parsed <= 0) {
-                    res.errorTitle = "Invalid NLP tolerance '" + value + "'";
-                    res.errorMessage = res.errorTitle;
+                double parsed =
+                    std::strtod(
+                        value.c_str(),
+                        &end);
+
+                if (end == value.c_str() ||
+                    *end ||
+                    errno == ERANGE ||
+                    !std::isfinite(parsed) ||
+                    parsed <= 0) {
+
+                    res.errorTitle =
+                        "Invalid NLP tolerance '" +
+                        value +
+                        "'";
+
+                    res.errorMessage =
+                        res.errorTitle;
+
                     return res;
                 }
+
                 res.solveOptions.tolerance = parsed;
+
             } else {
-                long parsed = std::strtol(value.c_str(), &end, 10);
-                if (end == value.c_str() || *end || errno == ERANGE || parsed < 0 || parsed > std::numeric_limits<int>::max()) {
-                    res.errorTitle = "Invalid NLP iteration limit '" + value + "'";
-                    res.errorMessage = res.errorTitle;
+                long parsed =
+                    std::strtol(
+                        value.c_str(),
+                        &end,
+                        10);
+
+                if (end == value.c_str() ||
+                    *end ||
+                    errno == ERANGE ||
+                    parsed < 0 ||
+                    parsed >
+                        std::numeric_limits<int>::max()) {
+
+                    res.errorTitle =
+                        "Invalid NLP iteration limit '" +
+                        value +
+                        "'";
+
+                    res.errorMessage =
+                        res.errorTitle;
+
                     return res;
                 }
-                res.solveOptions.iterationLimit = static_cast<int>(parsed);
+
+                res.solveOptions.iterationLimit =
+                    static_cast<int>(parsed);
             }
+
         } else if (arg == "--solver") {
+
             if (i + 1 >= argc) {
                 res.success = false;
-                res.errorTitle = "Missing value for option '--solver'";
-                res.errorDetails = "Supported engines: pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp";
-                res.errorMessage = "Error: Missing value for option '--solver'.";
+
+                res.errorTitle =
+                    "Missing value for option '--solver'";
+
+                res.errorDetails =
+                    "Supported engines: pdlp, dual_simplex, barrier, "
+                    "branch_and_cut, qp, nlp, super_admm";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--solver'.";
+
                 return res;
             }
+
             std::string solverVal = argv[++i];
-            if (solverVal.empty() || solverVal[0] == '-') {
+
+            if (solverVal.empty() ||
+                solverVal[0] == '-') {
+
                 res.success = false;
-                res.errorTitle = "Missing value for option '--solver'";
-                res.errorDetails = "Supported engines: pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp";
-                res.errorMessage = "Error: Missing value for option '--solver'.";
+
+                res.errorTitle =
+                    "Missing value for option '--solver'";
+
+                res.errorDetails =
+                    "Supported engines: pdlp, dual_simplex, barrier, "
+                    "branch_and_cut, qp, nlp, super_admm";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--solver'.";
+
                 return res;
             }
+
             if (!isValidSolverName(solverVal)) {
                 res.success = false;
-                res.errorTitle = "Invalid solver '" + solverVal + "'";
-                res.errorDetails = "Supported engines: pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp";
-                res.errorMessage = "Error: Invalid solver '" + solverVal +
-                                   "'. Supported solvers: pdlp, dual_simplex, barrier, branch_and_cut, qp, nlp.";
+
+                res.errorTitle =
+                    "Invalid solver '" +
+                    solverVal +
+                    "'";
+
+                res.errorDetails =
+                    "Supported engines: pdlp, dual_simplex, barrier, "
+                    "branch_and_cut, qp, nlp, super_admm";
+
+                res.errorMessage =
+                    "Error: Invalid solver '" +
+                    solverVal +
+                    "'. Supported solvers: pdlp, dual_simplex, "
+                    "barrier, branch_and_cut, qp, nlp, super_admm.";
+
                 return res;
             }
+
             res.solveOptions.solver = solverVal;
+
         } else if (arg == "--time-limit") {
+
             if (i + 1 >= argc) {
                 res.success = false;
-                res.errorTitle = "Missing value for option '--time-limit'";
-                res.errorDetails = "Time limit must be a positive finite number of seconds.";
-                res.errorMessage = "Error: Missing value for option '--time-limit'.";
+
+                res.errorTitle =
+                    "Missing value for option '--time-limit'";
+
+                res.errorDetails =
+                    "Time limit must be a positive finite number of seconds.";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--time-limit'.";
+
                 return res;
             }
+
             std::string limitStr = argv[++i];
+
             char* endPtr = nullptr;
-            double limitVal = std::strtod(limitStr.c_str(), &endPtr);
-            if (endPtr == limitStr.c_str() || *endPtr != '\0' || !std::isfinite(limitVal) || limitVal <= 0.0) {
+
+            double limitVal =
+                std::strtod(
+                    limitStr.c_str(),
+                    &endPtr);
+
+            if (endPtr == limitStr.c_str() ||
+                *endPtr != '\0' ||
+                !std::isfinite(limitVal) ||
+                limitVal <= 0.0) {
+
                 res.success = false;
-                res.errorTitle = "Invalid time limit '" + limitStr + "'";
-                res.errorDetails = "Must be a positive finite number of seconds.";
-                res.errorMessage = "Error: Invalid time limit '" + limitStr +
-                                   "'. Must be a positive number.";
+
+                res.errorTitle =
+                    "Invalid time limit '" +
+                    limitStr +
+                    "'";
+
+                res.errorDetails =
+                    "Must be a positive finite number of seconds.";
+
+                res.errorMessage =
+                    "Error: Invalid time limit '" +
+                    limitStr +
+                    "'. Must be a positive number.";
+
                 return res;
             }
-            res.solveOptions.timeLimitSeconds = limitVal;
-        } else if (arg == "--json" || arg == "--dump-model") {
+
+            res.solveOptions.timeLimitSeconds =
+                limitVal;
+
+        } else if (arg == "--json" ||
+                   arg == "--dump-model") {
+
             const std::string flag = arg;
-            if (i + 1 >= argc || std::string(argv[i + 1]).empty() || argv[i + 1][0] == '-') {
+
+            if (i + 1 >= argc ||
+                std::string(argv[i + 1]).empty() ||
+                argv[i + 1][0] == '-') {
+
                 res.success = false;
-                res.errorTitle = "Missing value for option '" + flag + "'";
-                res.errorDetails = "A file path is required.";
-                res.errorMessage = "Error: Missing value for option '" + flag + "'.";
+
+                res.errorTitle =
+                    "Missing value for option '" +
+                    flag +
+                    "'";
+
+                res.errorDetails =
+                    "A file path is required.";
+
+                res.errorMessage =
+                    "Error: Missing value for option '" +
+                    flag +
+                    "'.";
+
                 return res;
             }
+
             if (flag == "--json") {
-                res.solveOptions.jsonPath = argv[++i];
+                res.solveOptions.jsonPath =
+                    argv[++i];
             } else {
-                res.solveOptions.dumpModelPath = argv[++i];
+                res.solveOptions.dumpModelPath =
+                    argv[++i];
             }
+
         } else if (arg == "--threads") {
+
             if (i + 1 >= argc) {
                 res.success = false;
-                res.errorTitle = "Missing value for option '--threads'";
-                res.errorDetails = "Thread count must be a non-negative integer (0 = auto).";
-                res.errorMessage = "Error: Missing value for option '--threads'.";
+
+                res.errorTitle =
+                    "Missing value for option '--threads'";
+
+                res.errorDetails =
+                    "Thread count must be a non-negative integer (0 = auto).";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--threads'.";
+
                 return res;
             }
-            const std::string threadsVal = argv[++i];
+
+            const std::string threadsVal =
+                argv[++i];
+
             char* threadsEnd = nullptr;
-            const long threads = std::strtol(threadsVal.c_str(), &threadsEnd, 10);
-            if (threadsEnd == threadsVal.c_str() || *threadsEnd != '\0' ||
-                threads < 0 || threads > 4096) {
+
+            const long threads =
+                std::strtol(
+                    threadsVal.c_str(),
+                    &threadsEnd,
+                    10);
+
+            if (threadsEnd == threadsVal.c_str() ||
+                *threadsEnd != '\0' ||
+                threads < 0 ||
+                threads > 4096) {
+
                 res.success = false;
-                res.errorTitle = "Invalid thread count '" + threadsVal + "'";
-                res.errorDetails = "Must be a non-negative integer (0 = auto).";
-                res.errorMessage = "Error: Invalid thread count '" + threadsVal + "'.";
+
+                res.errorTitle =
+                    "Invalid thread count '" +
+                    threadsVal +
+                    "'";
+
+                res.errorDetails =
+                    "Must be a non-negative integer (0 = auto).";
+
+                res.errorMessage =
+                    "Error: Invalid thread count '" +
+                    threadsVal +
+                    "'.";
+
                 return res;
             }
-            res.solveOptions.threadCount = static_cast<int>(threads);
+
+            res.solveOptions.threadCount =
+                static_cast<int>(threads);
+
         } else if (arg == "--output") {
+
             if (i + 1 >= argc) {
                 res.success = false;
-                res.errorTitle = "Missing value for option '--output'";
-                res.errorDetails = "A file path is required to write the solution.";
-                res.errorMessage = "Error: Missing value for option '--output'.";
+
+                res.errorTitle =
+                    "Missing value for option '--output'";
+
+                res.errorDetails =
+                    "A file path is required to write the solution.";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--output'.";
+
                 return res;
             }
+
             std::string outVal = argv[++i];
-            if (outVal.empty() || outVal[0] == '-') {
+
+            if (outVal.empty() ||
+                outVal[0] == '-') {
+
                 res.success = false;
-                res.errorTitle = "Missing value for option '--output'";
-                res.errorDetails = "A file path is required to write the solution.";
-                res.errorMessage = "Error: Missing value for option '--output'.";
+
+                res.errorTitle =
+                    "Missing value for option '--output'";
+
+                res.errorDetails =
+                    "A file path is required to write the solution.";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--output'.";
+
                 return res;
             }
-            res.solveOptions.outputPath = outVal;
+
+            res.solveOptions.outputPath =
+                outVal;
+
         } else if (arg == "--backend") {
-            if (i + 1 >= argc || argv[i + 1][0] == '-' || argv[i + 1][0] == '\0') {
+
+            if (i + 1 >= argc ||
+                argv[i + 1][0] == '-' ||
+                argv[i + 1][0] == '\0') {
+
                 res.success = false;
-                res.errorTitle = "Missing value for option '--backend'";
-                res.errorDetails = "Supported backends: auto, cpu, cuda";
-                res.errorMessage = "Error: Missing value for option '--backend'.";
+
+                res.errorTitle =
+                    "Missing value for option '--backend'";
+
+                res.errorDetails =
+                    "Supported backends: auto, cpu, cuda";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--backend'.";
+
                 return res;
             }
-            std::string backendVal = argv[++i];
-            if (!solver::parseComputeBackend(backendVal).has_value()) {
+
+            std::string backendVal =
+                argv[++i];
+
+            if (!solver::parseComputeBackend(
+                    backendVal)
+                     .has_value()) {
+
                 res.success = false;
-                res.errorTitle = "Invalid backend '" + backendVal + "'";
-                res.errorDetails = "Supported backends: auto, cpu, cuda";
-                res.errorMessage = "Error: Invalid backend '" + backendVal +
-                                   "'. Supported backends: auto, cpu, cuda.";
+
+                res.errorTitle =
+                    "Invalid backend '" +
+                    backendVal +
+                    "'";
+
+                res.errorDetails =
+                    "Supported backends: auto, cpu, cuda";
+
+                res.errorMessage =
+                    "Error: Invalid backend '" +
+                    backendVal +
+                    "'. Supported backends: auto, cpu, cuda.";
+
                 return res;
             }
-            res.solveOptions.backend = backendVal;
+
+            res.solveOptions.backend =
+                backendVal;
+
         } else if (arg == "--cuda-device") {
+
             if (i + 1 >= argc) {
                 res.success = false;
-                res.errorTitle = "Missing value for option '--cuda-device'";
-                res.errorDetails = "A non-negative CUDA device index is required.";
-                res.errorMessage = "Error: Missing value for option '--cuda-device'.";
+
+                res.errorTitle =
+                    "Missing value for option '--cuda-device'";
+
+                res.errorDetails =
+                    "A non-negative CUDA device index is required.";
+
+                res.errorMessage =
+                    "Error: Missing value for option '--cuda-device'.";
+
                 return res;
             }
-            std::string deviceStr = argv[++i];
+
+            std::string deviceStr =
+                argv[++i];
+
             char* endPtr = nullptr;
-            const long deviceVal = std::strtol(deviceStr.c_str(), &endPtr, 10);
-            if (deviceStr.empty() || endPtr == deviceStr.c_str() || *endPtr != '\0' ||
-                deviceVal < 0 || deviceVal > 1024) {
+
+            const long deviceVal =
+                std::strtol(
+                    deviceStr.c_str(),
+                    &endPtr,
+                    10);
+
+            if (deviceStr.empty() ||
+                endPtr == deviceStr.c_str() ||
+                *endPtr != '\0' ||
+                deviceVal < 0 ||
+                deviceVal > 1024) {
+
                 res.success = false;
-                res.errorTitle = "Invalid CUDA device '" + deviceStr + "'";
-                res.errorDetails = "Must be a non-negative integer device index.";
-                res.errorMessage = "Error: Invalid CUDA device '" + deviceStr + "'.";
+
+                res.errorTitle =
+                    "Invalid CUDA device '" +
+                    deviceStr +
+                    "'";
+
+                res.errorDetails =
+                    "Must be a non-negative integer device index.";
+
+                res.errorMessage =
+                    "Error: Invalid CUDA device '" +
+                    deviceStr +
+                    "'.";
+
                 return res;
             }
-            res.solveOptions.cudaDevice = static_cast<int>(deviceVal);
-        } else if (!arg.empty() && arg[0] == '-') {
+
+            res.solveOptions.cudaDevice =
+                static_cast<int>(deviceVal);
+
+        } else if (!arg.empty() &&
+                   arg[0] == '-') {
+
             res.success = false;
-            res.errorTitle = "Unknown option '" + arg + "'";
-            res.errorDetails = "Run 'optimsolver solve --help' to see available options.";
-            res.errorMessage = "Error: Unknown option '" + arg + "'.\n" + getSolveHelp();
+
+            res.errorTitle =
+                "Unknown option '" +
+                arg +
+                "'";
+
+            res.errorDetails =
+                "Run 'optimsolver solve --help' to see available options.";
+
+            res.errorMessage =
+                "Error: Unknown option '" +
+                arg +
+                "'.\n" +
+                getSolveHelp();
+
             return res;
+
         } else {
+
             // Positional argument: model path
             if (res.solveOptions.modelPath.empty()) {
-                res.solveOptions.modelPath = arg;
+                res.solveOptions.modelPath =
+                    arg;
             } else {
                 res.success = false;
-                res.errorTitle = "Unexpected argument '" + arg + "'";
-                res.errorDetails = "Exactly one model path is required.";
-                res.errorMessage = "Error: Unexpected argument '" + arg +
-                                   "'. Exactly one model path is required.";
+
+                res.errorTitle =
+                    "Unexpected argument '" +
+                    arg +
+                    "'";
+
+                res.errorDetails =
+                    "Exactly one model path is required.";
+
+                res.errorMessage =
+                    "Error: Unexpected argument '" +
+                    arg +
+                    "'. Exactly one model path is required.";
+
                 return res;
             }
         }
+
         ++i;
     }
 
     if (res.solveOptions.modelPath.empty()) {
         res.success = false;
-        res.errorTitle = "Missing required model path";
-        res.errorDetails = "Usage: optimsolver solve <model.mps> [options]";
-        res.errorMessage = "Error: Missing required model path for 'solve' command.\n" +
-                           getSolveHelp();
+
+        res.errorTitle =
+            "Missing required model path";
+
+        res.errorDetails =
+            "Usage: optimsolver solve <model.mps> [options]";
+
+        res.errorMessage =
+            "Error: Missing required model path for 'solve' command.\n" +
+            getSolveHelp();
+
         return res;
     }
 
-    if (res.command == Command::Solve && isNlpPath(res.solveOptions.modelPath))
+    if (res.command == Command::Solve &&
+        isNlpPath(res.solveOptions.modelPath)) {
+
         res.command = Command::SolveNlp;
-    if (res.command == Command::Solve && (res.solveOptions.tolerance || res.solveOptions.iterationLimit)) {
-        res.errorTitle = "--tolerance and --iterations currently require a nonlinear model";
-        res.errorMessage = res.errorTitle;
+    }
+
+    if (res.command == Command::Solve &&
+        (res.solveOptions.tolerance ||
+         res.solveOptions.iterationLimit)) {
+
+        res.errorTitle =
+            "--tolerance and --iterations currently require a nonlinear model";
+
+        res.errorMessage =
+            res.errorTitle;
+
         return res;
     }
+
     res.success = true;
     return res;
 }
