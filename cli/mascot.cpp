@@ -393,14 +393,11 @@ void printSolveDashboard(std::ostream& out, const SolveDashboardInfo& info, cons
     for (std::size_t i = 0; i < totalWidth - 16; ++i) {
         hDash += "─";
     }
-<<<<<<< HEAD
     // Title "KAIRO" is 5 columns; "╭─ " + title + " " + hDash + "╮" spans totalWidth.
     for (int i = 0; i < 6; ++i) hDash += "─";
     std::string topBorder = s.dim() + "╭─" + s.reset() + " " + s.boldCyan() + "KAIRO" + s.reset() + " " +
-=======
 
     std::string topBorder = s.dim() + "╭─" + s.reset() + " " + s.boldCyan() + "OPTIMSOLVER" + s.reset() + " " +
->>>>>>> 9cf2e0e (Make CLI mascot portable on Windows)
                             s.dim() + hDash + "╮" + s.reset();
 
     std::string hDashBot;

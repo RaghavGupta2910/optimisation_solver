@@ -64,16 +64,13 @@ void test_help_root() {
     int code = runCli({"optimsolver", "--help"}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
     assert(out.find("Kernel for Advanced Integer & Real Optimization") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
     assert(out.find("Mathematical Optimization Engine") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("Getting Started") != std::string::npos);
 
     assert(out.find("solve <model.mps>") != std::string::npos);
@@ -85,13 +82,10 @@ void test_help_root() {
     code = runCli({"optimsolver", "-h"}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("Getting Started") != std::string::npos);
 
 
@@ -109,13 +103,10 @@ void test_help_solve() {
     int code = runCli({"optimsolver", "solve", "--help"}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("Usage") != std::string::npos);
 
     assert(out.find("solve <model.mps>") != std::string::npos);
@@ -133,13 +124,10 @@ void test_help_solve() {
     code = runCli({"optimsolver", "solve", "-h"}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("solve <model.mps>") != std::string::npos);
 
 
@@ -157,16 +145,13 @@ void test_no_arguments() {
     int code = runCli({"optimsolver"}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
     assert(out.find("Kernel for Advanced Integer & Real Optimization") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
     assert(out.find("Mathematical Optimization Engine") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("MAIN MENU") != std::string::npos);
 
     assert(out.find("Open MPS Model") != std::string::npos);
@@ -192,12 +177,9 @@ void test_unknown_command() {
     assert(err.find("Unknown command 'inspect'") != std::string::npos);
 
     // Errors must remain clean and not print the giant mascot
-<<<<<<< HEAD
     assert(err.find("Kernel for Advanced Integer & Real Optimization") == std::string::npos);
-=======
 
     assert(err.find("Mathematical Optimization Engine") == std::string::npos);
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
 
 
 
@@ -216,12 +198,9 @@ void test_solve_missing_model_path() {
     assert(code != 0);
 
     assert(err.find("Missing required model path") != std::string::npos);
-<<<<<<< HEAD
     assert(err.find("Kernel for Advanced Integer & Real Optimization") == std::string::npos);
-=======
 
     assert(err.find("Mathematical Optimization Engine") == std::string::npos);
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
 
 
 
@@ -484,12 +463,9 @@ void test_solve_missing_model_file() {
     assert(code != 0);
 
     assert(err.find("Failed to read MPS file") != std::string::npos);
-<<<<<<< HEAD
     assert(err.find("Kernel for Advanced Integer & Real Optimization") == std::string::npos);
-=======
 
     assert(err.find("Mathematical Optimization Engine") == std::string::npos);
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
 
 
 
@@ -524,13 +500,10 @@ void test_solve_real_model_pipeline() {
     int code = runCli({"optimsolver", "solve", mpsPath}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("Solving SIMPLE_LP") != std::string::npos);
 
     assert(out.find("Optimal") != std::string::npos);
@@ -558,13 +531,10 @@ void test_solve_infeasible_model() {
     int code = runCli({"optimsolver", "solve", mpsPath}, out, err);
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(out.find("Infeasible") != std::string::npos);
 
     assert(out.find("presolve proved the model infeasible") != std::string::npos ||
@@ -1086,16 +1056,13 @@ void test_interactive_menu_exit() {
     int code = runCli({"optimsolver"}, out, err, "5\n");
 
     assert(code == 0);
-<<<<<<< HEAD
     assert(out.find("KAIRO") != std::string::npos);
     assert(out.find("Exiting KAIRO.") != std::string::npos);
-=======
 
     assert(out.find("OPTIMSOLVER") != std::string::npos);
 
     assert(out.find("Exiting Optimisation Solver.") != std::string::npos);
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
     assert(err.empty());
 
     std::cout << "[PASSED] test_interactive_menu_exit\n";
@@ -1406,7 +1373,6 @@ void test_backend_report_serialization() {
 
 }
 
-<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // SolveReport in the CLI: every value below comes from the report of the
 // solve that produced the output, so each check names an exact value.
@@ -1544,9 +1510,7 @@ void test_report_invalid_model_and_options() {
            has(json, "\"validation\": null"), "refusal record has no stage sections");
     std::cout << "[PASSED] test_report_invalid_model_and_options\n";
 }
-=======
 
->>>>>>> bcdab6d (Add CLI SuperADMM selection regression)
 
 }  // namespace
 
