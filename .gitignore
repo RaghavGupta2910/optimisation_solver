@@ -44,3 +44,6 @@ __pycache__/
 
 # Dropped in the working directory by the HiGHS binary on every run.
 Highs.log
+
+# Per-instance CUDA benchmark console logs (the JSON/CSV next to them hold every result)
+benchmarks/results/cuda/*/logs/

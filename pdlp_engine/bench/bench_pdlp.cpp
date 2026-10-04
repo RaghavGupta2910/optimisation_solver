@@ -15,16 +15,24 @@
 //   core         end-to-end minus setup: what an iteration loop costs
 //   host checks  termination/certificate evaluation on the host, including
 //                the iterate downloads a device backend needs for them
+//
+// The last output line is "json " followed by one JSON object with the same
+// figures plus every timed run, for scripts that aggregate size sweeps
+// (benchmarks/cuda/run_cuda_benchmarks.ps1).
 
 #include "pdlp/pdlp_solver.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <random>
+#include <sstream>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -113,6 +121,16 @@ struct Timed {
     double endToEndSeconds = 0.0;
 };
 
+// Non-finite values are not JSON numbers.
+std::string jsonNumber(double value) {
+    if (!std::isfinite(value)) {
+        return "null";
+    }
+    std::ostringstream out;
+    out << std::setprecision(17) << value;
+    return out.str();
+}
+
 Timed timedSolve(const pdlp::CompiledLp& problem, const pdlp::PdlpOptions& options) {
     const auto start = std::chrono::steady_clock::now();
     Timed timed;
@@ -199,5 +217,38 @@ int main(int argc, char** argv) {
               << "dual residual   " << result.dualResidual << '\n'
               << "relative gap    " << result.relativeGap << '\n'
               << "objective       " << result.primalObjective << '\n';
+
+    std::ostringstream runSeconds;
+    for (std::size_t r = 0; r < runs.size(); ++r) {
+        runSeconds << (r == 0 ? "" : ",") << jsonNumber(runs[r].endToEndSeconds);
+    }
+    std::cout << "json {\"engine\":\"pdlp\""
+              << ",\"rows\":" << rows
+              << ",\"columns\":" << columns
+              << ",\"nonzeros\":" << problem.matrix.nonzeros()
+              << ",\"iteration_limit\":" << iterationLimit
+              << ",\"threads\":" << threads
+              << ",\"hardware_threads\":" << std::thread::hardware_concurrency()
+              << ",\"requested_backend\":\"" << pdlp::toString(backend) << '"'
+              << ",\"executed_backend\":\"" << pdlp::toString(result.executedBackend) << '"'
+              << ",\"cuda_device\":\"" << (cuda.usable ? cuda.deviceName : std::string()) << '"'
+              << ",\"cuda_runtime\":" << cuda.runtimeVersion
+              << ",\"status\":\"" << pdlp::toString(result.status) << '"'
+              << ",\"iterations\":" << result.iterations
+              << ",\"warmup_seconds\":" << jsonNumber(warmUp.endToEndSeconds)
+              << ",\"run_seconds\":[" << runSeconds.str() << ']'
+              << ",\"median_seconds\":" << jsonNumber(median.endToEndSeconds)
+              << ",\"setup_seconds\":" << jsonNumber(profile.setupSeconds)
+              << ",\"core_seconds\":" << jsonNumber(coreSeconds)
+              << ",\"host_check_seconds\":" << jsonNumber(result.hostCheckSeconds)
+              << ",\"snapshot_seconds\":" << jsonNumber(profile.snapshotSeconds)
+              << ",\"h2d_bytes\":" << profile.hostToDeviceBytes
+              << ",\"d2h_bytes\":" << profile.deviceToHostBytes
+              << ",\"host_syncs\":" << profile.synchronisations
+              << ",\"objective\":" << jsonNumber(result.primalObjective)
+              << ",\"primal_residual\":" << jsonNumber(result.primalResidual)
+              << ",\"dual_residual\":" << jsonNumber(result.dualResidual)
+              << ",\"relative_gap\":" << jsonNumber(result.relativeGap)
+              << "}\n";
     return 0;
 }
