@@ -64,9 +64,11 @@ function(optimsolver_configure_cuda_target target)
     target_compile_features(${target} PUBLIC cxx_std_17)
     target_compile_options(${target} PRIVATE
         # Explicitly the IEEE-conforming defaults, so the intent is visible and
-        # a stray global flag cannot silently change them. FMA contraction
-        # (-fmad=true) stays on: it is exact per operation and matches the CPU
-        # build's -ffp-contract=fast.
+        # a stray global flag cannot silently change them. FMA contraction is
+        # left at nvcc's default (-fmad=true) here, matching GCC/Clang host
+        # builds with -ffp-contract=fast; an engine may override it to match
+        # its host compiler (pdlp_engine adds -fmad=false under MSVC, whose
+        # /fp:precise never contracts).
         $<$<COMPILE_LANGUAGE:CUDA>:--prec-div=true>
         $<$<COMPILE_LANGUAGE:CUDA>:--prec-sqrt=true>
         $<$<COMPILE_LANGUAGE:CUDA>:--ftz=false>
