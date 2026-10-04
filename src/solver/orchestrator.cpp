@@ -895,6 +895,7 @@ SolveResult runReducedPipeline(const model::Model& presolvedModel,
     // so rather than leave a CUDA request looking honoured.
     if (options.backend == ComputeBackend::Cuda && result.backendReason.empty() &&
         (result.executedEngine == Engine::DualSimplex ||
+         result.executedEngine == Engine::Barrier ||
          result.executedEngine == Engine::BranchAndCut ||
          result.executedEngine == Engine::Miqp)) {
         result.backendReason = std::string(toString(result.executedEngine)) +

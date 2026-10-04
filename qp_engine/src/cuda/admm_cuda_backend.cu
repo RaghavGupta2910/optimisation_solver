@@ -272,11 +272,6 @@ public:
                                         CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, workspace_.data()));
     }
 
-    [[nodiscard]] std::size_t deviceBytes() const noexcept {
-        return startWide_.bytes() + indexWide_.bytes() + startNarrow_.bytes() +
-               indexNarrow_.bytes() + value_.bytes() + workspace_.bytes();
-    }
-
 private:
     int rows_;
     int columns_;

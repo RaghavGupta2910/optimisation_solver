@@ -124,14 +124,17 @@ void testExplicitCudaIsNeverSilentlyCpu() {
 // Engines without a CUDA backend run on the CPU whatever was requested, and
 // say so.
 void testEnginesWithoutCudaSayCpu() {
-    solver::SolverOptions options;
-    options.forceEngine = solver::Engine::DualSimplex;
-    options.backend = solver::ComputeBackend::Cuda;
-    const solver::SolveResult r = solver::solve(textbookLp(), options);
-    ck(r.status == solver::SolveStatus::Optimal, "dual simplex still solves");
-    ck(r.executedBackend == solver::ComputeBackend::Cpu, "dual simplex runs on the CPU");
-    ck(r.backendReason.find("has no CUDA backend") != std::string::npos,
-       "the CUDA request is acknowledged as not applicable: " + r.backendReason);
+    for (const solver::Engine engine : {solver::Engine::DualSimplex, solver::Engine::Barrier}) {
+        const std::string name = solver::toString(engine);
+        solver::SolverOptions options;
+        options.forceEngine = engine;
+        options.backend = solver::ComputeBackend::Cuda;
+        const solver::SolveResult r = solver::solve(textbookLp(), options);
+        ck(r.status == solver::SolveStatus::Optimal, name + " still solves");
+        ck(r.executedBackend == solver::ComputeBackend::Cpu, name + " runs on the CPU");
+        ck(r.backendReason.find("has no CUDA backend") != std::string::npos,
+           "the CUDA request is acknowledged as not applicable: " + r.backendReason);
+    }
 }
 
 }  // namespace

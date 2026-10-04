@@ -10,8 +10,10 @@
 
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -195,6 +197,51 @@ void solveEquivalence() {
     }
 }
 
+bool sameBits(const std::vector<double>& a, const std::vector<double>& b) {
+    return a.size() == b.size() &&
+           (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
+}
+
+bool sameBits(double a, double b) {
+    return std::memcmp(&a, &b, sizeof(double)) == 0;
+}
+
+// The device reductions use no atomics and a fixed launch configuration, and
+// the host checks run single-threaded here, so repeating a CUDA solve on the
+// same device must reproduce it bit for bit.
+void reproducibility() {
+    struct Case {
+        const char* name;
+        pdlp::CompiledLp problem;
+    };
+    const Case cases[] = {
+        {"medium", feasibleLp(2u, 1500, 2500)},
+        {"infeasible", infeasibleLp()},
+        {"unbounded", unboundedLp()},
+    };
+    for (const Case& c : cases) {
+        run(std::string("cuda solve is reproducible: ") + c.name, [&] {
+            const auto none = [](pdlp::PdlpOptions&) {};
+            const pdlp::PdlpResult first = solveWith(c.problem, pdlp::ComputeBackend::Cuda, none);
+            for (int repeat = 0; repeat < 2; ++repeat) {
+                const pdlp::PdlpResult again = solveWith(c.problem, pdlp::ComputeBackend::Cuda, none);
+                contract::check(again.executedBackend == pdlp::ComputeBackend::Cuda,
+                                "the repeated solve must run on CUDA: " + again.backendMessage);
+                contract::check(again.status == first.status, "status differs between runs");
+                contract::check(again.iterations == first.iterations &&
+                                    again.stepTrials == first.stepTrials,
+                                "iteration or step-trial count differs between runs");
+                contract::check(sameBits(again.primalObjective, first.primalObjective) &&
+                                    sameBits(again.primal, first.primal) &&
+                                    sameBits(again.rowDual, first.rowDual) &&
+                                    sameBits(again.primalRay, first.primalRay) &&
+                                    sameBits(again.dualRay, first.dualRay),
+                                "solution bits differ between runs");
+            }
+        });
+    }
+}
+
 // Auto must pick CUDA above the threshold when a device is usable.
 void autoSelection() {
     run("auto selects cuda above threshold", [] {
@@ -238,6 +285,7 @@ int main() {
 
     kernelEquivalence();
     solveEquivalence();
+    reproducibility();
     autoSelection();
 
     if (failures == 0) {

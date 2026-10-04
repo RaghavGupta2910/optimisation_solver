@@ -11,8 +11,11 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -146,6 +149,48 @@ void solveEquivalence() {
     }
 }
 
+bool sameBits(const std::vector<double>& a, const std::vector<double>& b) {
+    return a.size() == b.size() &&
+           (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
+}
+
+bool sameBits(double a, double b) {
+    return std::memcmp(&a, &b, sizeof(double)) == 0;
+}
+
+// Deterministic CSR SpMV, atomic-free reductions and a single-threaded host
+// side: repeating a hybrid solve on the same device must reproduce it bit for bit.
+void reproducibility() {
+    std::vector<qpcontract::Fixture> fixtures = qpcontract::fixtures();
+    std::vector<std::pair<std::string, qp::QpModel>> cases;
+    for (qpcontract::Fixture& fixture : fixtures) {
+        cases.emplace_back(fixture.name, std::move(fixture.model));
+    }
+    cases.emplace_back("infeasible", infeasibleModel());
+    cases.emplace_back("unbounded", unboundedModel());
+
+    for (const auto& c : cases) {
+        run("cuda solve is reproducible: " + c.first, [&] {
+            qp::AdmmOptions options;
+            options.threadCount = 1;
+            options.backend = qp::ComputeBackend::Cuda;
+            const qp::AdmmResult first = qp::QpSolver{}.solve(c.second, options);
+            for (int repeat = 0; repeat < 2; ++repeat) {
+                const qp::AdmmResult again = qp::QpSolver{}.solve(c.second, options);
+                qpcontract::check(again.executedBackend == qp::ComputeBackend::Cuda,
+                                  "the repeated solve must run on CUDA: " + again.backendMessage);
+                qpcontract::check(again.status == first.status, "status differs between runs");
+                qpcontract::check(again.iterations == first.iterations,
+                                  "iteration count differs between runs");
+                qpcontract::check(sameBits(again.primalObjective, first.primalObjective) &&
+                                      sameBits(again.primal, first.primal) &&
+                                      sameBits(again.constraintDual, first.constraintDual),
+                                  "solution bits differ between runs");
+            }
+        });
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -165,6 +210,7 @@ int main() {
     run("temporary 64-bit upload", temporaryUploadLifetime<std::int64_t>);
     backendEquivalence();
     solveEquivalence();
+    reproducibility();
 
     if (failures == 0) {
         std::printf("All QP CUDA tests passed\n");
