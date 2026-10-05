@@ -25,6 +25,12 @@ Every engine (dual simplex, primal–dual interior point, first-order PDHG, ADMM
 
 > **Status:** validated on the public test sets below, with every failure listed, and under active development. It is not yet a drop-in replacement for CPLEX or Xpress on speed or scale; see [Limitations](#limitations).
 
+## 🌐 KAIRO Website
+
+Visit the official **[KAIRO website](https://kairo-three-snowy.vercel.app/)** for a quick introduction to the project and the product built around the OptimSolver core.  
+The website presents KAIRO in a more accessible, visual format, while this repository contains the underlying solver architecture, numerical engines, benchmarks and validation work.  
+For implementation details, reproducible results and developer documentation, continue through the sections below.
+
 ## At a glance
 
 Measured 2026-10-01 on `main` (`1a00f09`): Release build, Apple M3, one thread per solve, each solve in its own process. A **verified** result is the [independent checker's](#correctness--validation) verdict on the original model, not the solver's own status. The per-instance record is in [benchmarks/results/RESULTS_2026-10-01.md](benchmarks/results/RESULTS_2026-10-01.md).
